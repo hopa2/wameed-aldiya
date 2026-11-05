@@ -1,37 +1,16 @@
 # ============================================================
-# إضافة منظومة وميض الضياء فوق docker-compose.yml الموجود في C:\wameed
-# (n8n + postgres كما في ملف وكيل الإعلانات). لا يغيّر شيئًا في الخدمتين
-# إلا إضافة متغيرات وقراءة مجلد المنظومة داخل n8n.
+# لوحة تحكم وميض الضياء فوق docker-compose.yml الموجود في C:\wameed
+# (postgres + n8n + waha). تضيف خدمة واحدة فقط: wameed-dashboard،
+# ومتغيرًا واحدًا لـ n8n (WAMEED_DASH_TOKEN) يحمي webhook «SYS - Dashboard Approve».
 #
-# التفعيل: في C:\wameed\.env أضف السطر:
+# التفعيل: scripts/install.ps1 يضيف إلى C:\wameed\.env السطر:
 #   COMPOSE_FILE=docker-compose.yml;wameed-aldiya/system/docker-compose.wameed.yml
-# ثم: docker compose up -d --build
 # (المسارات النسبية هنا تُحسب من C:\wameed، مجلد الملف الأول)
 # ============================================================
 services:
   n8n:
     environment:
-      WAMEED_HOOK_TOKEN: ${WAMEED_HOOK_TOKEN:?ضع WAMEED_HOOK_TOKEN في .env}
-      WAHA_API_KEY: ${WAHA_API_KEY:-}
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
-    volumes:
-      - ${WAMEED_SYSTEM_DIR:-./wameed-aldiya/system}:/wameed:ro
-
-  # يطبّق مخطط wameed على Postgres ثم يخرج. آمن للتكرار، ولا يكتب فوق تعديلاتك.
-  wameed-migrate:
-    image: ${WAMEED_PG_IMAGE:-postgres:16}
-    restart: "no"
-    depends_on: [postgres]
-    environment:
-      PGHOST: postgres
-      PGUSER: wameed
-      PGDATABASE: n8n
-      PGPASSWORD: ${PG_PASSWORD}
-    volumes:
-      - ${WAMEED_SYSTEM_DIR:-./wameed-aldiya/system}/db:/db:ro
-    entrypoint: ["sh", "-c"]
-    command:
-      - 'until pg_isready -q; do sleep 2; done; for f in /db/0*.sql; do psql -v ON_ERROR_STOP=1 -q -f "$$f" || exit 1; done; echo "wameed schema OK"'
+      WAMEED_DASH_TOKEN: ${WAMEED_DASH_TOKEN:?ضع WAMEED_DASH_TOKEN في .env}
 
   wameed-dashboard:
     build: ${WAMEED_SYSTEM_DIR:-./wameed-aldiya/system}/dashboard
@@ -40,14 +19,19 @@ services:
     depends_on: [postgres, n8n]
     environment:
       DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:?ضع DASHBOARD_PASSWORD في .env}
-      WAMEED_HOOK_TOKEN: ${WAMEED_HOOK_TOKEN}
-      N8N_INTERNAL_URL: http://n8n:5678
+      WAMEED_DASH_TOKEN: ${WAMEED_DASH_TOKEN}
       PGHOST: postgres
       PGUSER: wameed
-      PGDATABASE: n8n
       PGPASSWORD: ${PG_PASSWORD}
+      BIZ_PGDATABASE: wameed_ads      # biz_* وads_* (نفس Credential «Postgres wameed_ads»)
+      N8N_PGDATABASE: n8n             # حالة الـ workflows (قراءة فقط)
+      N8N_INTERNAL_URL: http://n8n:5678
+      WAHA_URL: http://waha:3000
+      WAHA_API_KEY: ${WAHA_API_KEY:-}
+      OLLAMA_URL: http://host.docker.internal:11434
+      MANAGER_URL: http://100.95.125.96:55668
       TZ: Asia/Riyadh
     ports:
       - "127.0.0.1:8080:8080"     # من الجوال: عبر tailscale serve فقط (انظر الدليل)
     extra_hosts:
-      - "host.docker.internal:host-gateway"   # لقراءة حالة Ollama
+      - "host.docker.internal:host-gateway"   # Ollama يعمل على ويندوز مباشرة

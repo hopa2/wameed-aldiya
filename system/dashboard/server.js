@@ -1,6 +1,11 @@
-// لوحة تحكم منظومة وميض الضياء
-// خادم Node بلا إطار: يقرأ ويكتب في مخطط wameed على Postgres، ويطلب من n8n
-// التشغيل والتنفيذ عبر webhooks داخلية. كل الحواجز في Postgres (wameed.gate_check).
+// لوحة تحكم وميض الضياء: طبقة فوق المنظومة الموجودة على اللابتوب.
+// لا تملك بوابة ولا وكلاء خاصين بها. تقرأ وتكتب في الجداول التي تستخدمها
+// workflows الموجودة أصلًا، وبنفس الصيغة التي تكتب بها:
+//   قاعدة wameed_ads (نفس Credential «Postgres wameed_ads» التي تستخدمها الـ workflows):
+//       biz_state, biz_guardrails, biz_approvals, biz_audit_log, biz_manager_snapshots (منظومة المحل)
+//       ads_runs, ads_actions, ads_state (وكيل الإعلانات)
+//   قاعدة n8n: workflow_entity / execution_entity (حالة كل workflow، قراءة فقط)
+// وتفحص حيًا: n8n وOllama وWAHA وManager.io.
 'use strict';
 const http = require('http');
 const fs = require('fs');
@@ -11,9 +16,15 @@ const { Pool } = require('pg');
 const env = process.env;
 const PORT = Number(env.PORT || 8080);
 const PASSWORD = env.DASHBOARD_PASSWORD || '';
-const HOOK_TOKEN = env.WAMEED_HOOK_TOKEN || '';
 const N8N_URL = (env.N8N_INTERNAL_URL || 'http://n8n:5678').replace(/\/$/, '');
-const SECRET = crypto.createHash('sha256').update('wameed-dash|' + PASSWORD + '|' + HOOK_TOKEN).digest();
+const OLLAMA_URL = (env.OLLAMA_URL || 'http://host.docker.internal:11434').replace(/\/$/, '');
+const WAHA_URL = (env.WAHA_URL || 'http://waha:3000').replace(/\/$/, '');
+const WAHA_KEY = env.WAHA_API_KEY || '';
+const MANAGER_URL = (env.MANAGER_URL || 'http://100.95.125.96:55668').replace(/\/$/, '');
+// «موافقة» اللوحة تمرّ عبر workflow «SYS - Dashboard Approve» إلى SYS - Approval Gate نفسها
+const GATE_TOKEN = env.WAMEED_DASH_TOKEN || '';
+const GATE_HOOK = GATE_TOKEN.length >= 20 ? (env.GATE_APPROVE_WEBHOOK || N8N_URL + '/webhook/wameed-dash-approve') : '';
+const SECRET = crypto.createHash('sha256').update('wameed-dash|' + PASSWORD + '|' + (env.PGPASSWORD || '')).digest();
 const SESSION_HOURS = 24 * 14;
 
 if (!PASSWORD || PASSWORD.length < 8) {
@@ -21,13 +32,18 @@ if (!PASSWORD || PASSWORD.length < 8) {
   process.exit(1);
 }
 
-const pool = new Pool({
-  host: env.PGHOST || 'postgres', port: Number(env.PGPORT || 5432),
-  database: env.PGDATABASE || 'n8n', user: env.PGUSER || 'wameed', password: env.PGPASSWORD,
-  max: 5, idleTimeoutMillis: 30000,
-});
-const q = async (sql, params = []) => (await pool.query(sql, params)).rows;
-const q1 = async (sql, params = []) => (await q(sql, params))[0];
+const pgBase = { host: env.PGHOST || 'postgres', port: Number(env.PGPORT || 5432), user: env.PGUSER || 'wameed',
+                 password: env.PGPASSWORD, max: 4, idleTimeoutMillis: 30000 };
+const n8nDb = new Pool({ ...pgBase, database: env.N8N_PGDATABASE || 'n8n' });
+const bizDb = new Pool({ ...pgBase, database: env.BIZ_PGDATABASE || 'wameed_ads' });
+const adsDb = (env.ADS_PGDATABASE || 'wameed_ads') === (env.BIZ_PGDATABASE || 'wameed_ads') ? bizDb
+            : new Pool({ ...pgBase, database: env.ADS_PGDATABASE });
+for (const p of new Set([n8nDb, bizDb, adsDb])) p.on('error', e => console.error('pg:', e.message));
+const q = async (sql, params = []) => (await bizDb.query(sql, params)).rows;   // biz_*
+const qa = async (sql, params = []) => (await adsDb.query(sql, params)).rows;  // ads_*
+const qn = async (sql, params = []) => (await n8nDb.query(sql, params)).rows;  // n8n نفسه
+// الجداول قد لا تكون موجودة بعد (مثلًا لم يعمل workflow معين قط): نعيد null بدل إسقاط الصفحة كلها
+const soft = (p) => p.catch(e => ({ error: e.message }));
 
 // ---------- الجلسة ----------
 function sign(exp) { return crypto.createHmac('sha256', SECRET).update(String(exp)).digest('base64url'); }
@@ -41,7 +57,7 @@ function authed(req) {
   const a = Buffer.from(m[2]), b = Buffer.from(sign(m[1]));
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
-const fails = new Map(); // ip -> [timestamps]
+const fails = new Map();
 function tooMany(ip) {
   const now = Date.now(), list = (fails.get(ip) || []).filter(t => now - t < 10 * 60e3);
   fails.set(ip, list);
@@ -56,204 +72,197 @@ function send(res, code, obj, headers = {}) {
 function body(req) {
   return new Promise((resolve, reject) => {
     let b = '';
-    req.on('data', c => { b += c; if (b.length > 256e3) { reject(new Error('الطلب كبير جدًا')); req.destroy(); } });
+    req.on('data', c => { b += c; if (b.length > 64e3) { reject(new Error('الطلب كبير جدًا')); req.destroy(); } });
     req.on('end', () => { try { resolve(b ? JSON.parse(b) : {}); } catch { reject(new Error('JSON غير صالح')); } });
   });
 }
-async function fetchJson(url, opts = {}, ms = 5000) {
+async function fetchJson(url, opts = {}, ms = 4000) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), ms);
   try {
     const r = await fetch(url, { ...opts, signal: ctl.signal });
     const text = await r.text();
     let json = null; try { json = JSON.parse(text); } catch {}
-    return { ok: r.ok, status: r.status, json, text };
+    return { ok: r.ok, status: r.status, json };
   } finally { clearTimeout(t); }
 }
-async function callN8n(hookPath, payload) {
-  try {
-    const r = await fetchJson(`${N8N_URL}/webhook/${hookPath}`, {
-      method: 'POST', headers: { 'content-type': 'application/json', 'x-wameed-token': HOOK_TOKEN },
-      body: JSON.stringify(payload),
-    }, 15000);
-    return r.ok ? { ok: true } : { ok: false, error: `n8n رد بـ ${r.status}` };
-  } catch (e) { return { ok: false, error: 'n8n لا يرد: ' + e.message }; }
+const errMsg = (e) => e.name === 'AbortError' ? 'لا يرد (انتهت المهلة)' : (e.cause?.code || e.message);
+
+// ---------- الفحص الحي (مخزن 20 ثانية حتى لا نثقل الأجهزة) ----------
+let liveCache = { at: 0, data: null };
+async function live() {
+  if (Date.now() - liveCache.at < 20e3 && liveCache.data) return liveCache.data;
+  const check = async (fn) => { try { return await fn(); } catch (e) { return { ok: false, detail: errMsg(e) }; } };
+  const [n8n, ollama, waha, manager] = await Promise.all([
+    check(async () => { const r = await fetchJson(N8N_URL + '/healthz'); return { ok: r.ok, detail: r.ok ? '' : 'رد ' + r.status }; }),
+    check(async () => {
+      const [tags, ps] = await Promise.all([fetchJson(OLLAMA_URL + '/api/tags'), fetchJson(OLLAMA_URL + '/api/ps')]);
+      const loaded = (ps.json?.models || []).map(m => `${m.name} (${(m.size_vram / 1e9).toFixed(1)}GB)`);
+      const models = (tags.json?.models || []).map(m => m.name);
+      return { ok: tags.ok, detail: loaded.length ? 'في الذاكرة: ' + loaded.join('، ') : 'مثبت: ' + models.join('، ') };
+    }),
+    check(async () => {
+      const r = await fetchJson(WAHA_URL + '/api/sessions?all=true', { headers: WAHA_KEY ? { 'x-api-key': WAHA_KEY } : {} });
+      if (r.status === 401) return { ok: false, detail: 'WAHA يعمل لكن المفتاح غير صحيح (WAHA_API_KEY)' };
+      const s = Array.isArray(r.json) ? r.json : [];
+      const working = s.filter(x => x.status === 'WORKING');
+      return { ok: r.ok && working.length > 0,
+               detail: s.length ? s.map(x => `${x.name}: ${x.status}`).join('، ') : (r.ok ? 'لا توجد جلسة واتساب' : 'رد ' + r.status) };
+    }),
+    // أي رد HTTP يعني أن Manager.io يعمل على جهاز المحل (لا نرسل مفتاح الـ API من هنا)
+    check(async () => { const r = await fetchJson(MANAGER_URL + '/', {}, 5000); return { ok: true, detail: 'جهاز المحل يرد (' + r.status + ')' }; }),
+  ]);
+  liveCache = { at: Date.now(), data: { n8n, ollama, waha, manager } };
+  return liveCache.data;
 }
 
-// ---------- الواجهات ----------
+// ---------- القراءة ----------
+const isTrue = (v) => v === true || v === 'true' || v === '"true"';
+
+async function pausedState() {
+  const [biz, ads] = await Promise.all([
+    soft(q(`SELECT value::text AS v FROM biz_state WHERE key = 'system_paused'`)),
+    soft(qa(`SELECT value::text AS v FROM ads_state WHERE key = 'system_paused'`)),
+  ]);
+  return { biz: Array.isArray(biz) ? isTrue(biz[0]?.v) : null, ads: Array.isArray(ads) ? isTrue(ads[0]?.v) : null };
+}
+
 const routes = [];
 const route = (method, re, fn) => routes.push({ method, re, fn });
 
 route('GET', /^\/api\/overview$/, async () => {
-  const [o] = await q(`
-    SELECT wameed.cfg_bool('system_paused') AS paused, wameed.cfg_text('dry_run_until') AS dry_run_until,
-           wameed.cfg_bool('shadow_mode') AS shadow_mode, wameed.cfg_num('cap_daily', 10000) AS cap_daily,
-           wameed.cap_used_today() AS cap_used, wameed.riyadh_today()::text AS today,
-           (SELECT count(*) FROM wameed.actions WHERE status = 'pending')::int AS pending,
-           (SELECT count(*) FROM wameed.actions WHERE status = 'needs_manual')::int AS manual,
-           (SELECT count(*) FROM wameed.agent_runs WHERE started_at > now() - interval '24 hours')::int AS runs_24h,
-           (SELECT count(*) FROM wameed.agent_runs WHERE started_at > now() - interval '24 hours' AND status IN ('error','invalid_output'))::int AS errors_24h,
-           (SELECT count(*) FROM wameed.actions WHERE created_at > now() - interval '24 hours' AND status = 'auto_rejected')::int AS blocked_24h,
-           (SELECT to_jsonb(s) FROM wameed.sales_daily s WHERE day = wameed.riyadh_today() - 1) AS sales_yesterday,
-           (SELECT to_jsonb(s) FROM wameed.sales_daily s WHERE day = wameed.riyadh_today() - 8) AS sales_week_ago,
-           (SELECT count(*) FROM wameed.stock_items WHERE (reorder_level IS NOT NULL AND qty_on_hand <= reorder_level)
-               OR (avg_daily_sales > 0 AND qty_on_hand / avg_daily_sales < wameed.cfg_num('reorder_cover_days', 14)))::int AS low_stock,
-           (SELECT COALESCE(sum(balance), 0) FROM wameed.receivables WHERE COALESCE(due_date, invoice_date) < wameed.riyadh_today() - 30) AS overdue_30,
-           (SELECT max(updated_at) FROM wameed.stock_items) AS stock_updated_at,
-           (SELECT COALESCE(jsonb_agg(h ORDER BY component), '[]') FROM wameed.health h) AS health,
-           (SELECT COALESCE(jsonb_agg(e ORDER BY e.id DESC), '[]') FROM (SELECT * FROM wameed.events ORDER BY id DESC LIMIT 8) e) AS events,
-           wameed.cfg_text('ollama_url') AS ollama_url`);
-  // فحص حي من اللوحة نفسها
-  const live = {};
-  try {
-    const [tags, ps] = await Promise.all([fetchJson(o.ollama_url + '/api/tags'), fetchJson(o.ollama_url + '/api/ps')]);
-    live.ollama = { ok: tags.ok, models: (tags.json?.models || []).map(m => m.name),
-                    loaded: (ps.json?.models || []).map(m => ({ name: m.name, vram_gb: +(m.size_vram / 1e9).toFixed(1) })) };
-  } catch (e) { live.ollama = { ok: false, error: e.message }; }
-  try { live.n8n = { ok: (await fetchJson(N8N_URL + '/healthz')).ok }; } catch (e) { live.n8n = { ok: false, error: e.message }; }
-  delete o.ollama_url;
-  return { ...o, live };
+  const [paused, liveData, biz, ads, wf, snaps] = await Promise.all([
+    pausedState(),
+    live(),
+    soft(q(`
+      SELECT (SELECT count(*) FROM biz_approvals WHERE status = 'pending' AND now() <= expires_at)::int AS pending,
+             (SELECT COALESCE(json_object_agg(status, n), '{}') FROM (SELECT status, count(*) n FROM biz_approvals
+                 WHERE created_at > now() - interval '24 hours' GROUP BY status) t) AS last24,
+             (SELECT COALESCE(sum(amount), 0) FROM biz_approvals WHERE status = 'executed' AND action_type = 'purchase_order'
+                 AND executed_at > now() - interval '7 days') AS po7d,
+             (SELECT COALESCE(sum(amount), 0) FROM biz_approvals WHERE status = 'executed' AND action_type = 'purchase_order'
+                 AND executed_at::date = now()::date) AS po_today,
+             (SELECT value::text FROM biz_guardrails WHERE key = 'po_max_per_day') AS po_max_per_day`)),
+    soft(qa(`
+      SELECT (SELECT to_json(r) FROM (SELECT run_id, run_type, status, dry_run, started_at, summary FROM ads_runs ORDER BY run_id DESC LIMIT 1) r) AS last_run,
+             (SELECT COALESCE(json_object_agg(status, n), '{}') FROM (SELECT status, count(*) n FROM ads_actions
+                 WHERE created_at > now() - interval '7 days' GROUP BY status) t) AS actions7d`)),
+    soft(qn(`
+      SELECT count(*) FILTER (WHERE w.active)::int AS active, count(*)::int AS total,
+             (SELECT count(*) FROM execution_entity e WHERE e."startedAt" > now() - interval '24 hours' AND e."deletedAt" IS NULL)::int AS runs24,
+             (SELECT count(*) FROM execution_entity e WHERE e."startedAt" > now() - interval '24 hours' AND e."deletedAt" IS NULL
+                 AND e.status IN ('error', 'crashed'))::int AS errors24
+      FROM workflow_entity w WHERE NOT COALESCE(w."isArchived", false)`)),
+    soft(q(`SELECT DISTINCT ON (resource) resource, records, taken_at FROM biz_manager_snapshots ORDER BY resource, taken_at DESC`)),
+  ]);
+  const events = await recentEvents(8);
+  return { paused, live: liveData, biz: biz[0] || biz, ads: ads[0] || ads, workflows: wf[0] || wf, snapshots: snaps, events };
 });
 
-route('GET', /^\/api\/agents$/, async () => q(`
-  SELECT a.name, a.label_ar, a.description_ar, a.model, a.enabled, a.schedule, a.managed_by, a.output_kind, a.sort,
-         r.status AS last_status, r.started_at AS last_at, r.summary AS last_summary, r.id AS last_run_id,
-         (SELECT count(*) FROM wameed.agent_runs x WHERE x.agent = a.name AND x.started_at > now() - interval '7 days')::int AS runs_7d,
-         (SELECT count(*) FROM wameed.agent_runs x WHERE x.agent = a.name AND x.started_at > now() - interval '7 days'
-            AND x.status IN ('error','invalid_output'))::int AS errors_7d,
-         (SELECT count(*) FROM wameed.actions x WHERE x.agent = a.name AND x.status = 'pending')::int AS pending
-  FROM wameed.agents a
-  LEFT JOIN LATERAL (SELECT * FROM wameed.agent_runs r WHERE r.agent = a.name ORDER BY started_at DESC LIMIT 1) r ON true
-  ORDER BY a.sort, a.name`));
+async function recentEvents(limit) {
+  const [a, b] = await Promise.all([
+    soft(q(`SELECT 'biz' AS src, l.at, l.agent, l.event, l.approval_id, a.summary
+            FROM biz_audit_log l LEFT JOIN biz_approvals a ON a.id = l.approval_id ORDER BY l.id DESC LIMIT $1`, [limit])),
+    soft(qa(`SELECT 'ads' AS src, created_at AS at, source AS agent, action_type || ':' || status AS event, action_id AS approval_id,
+                    left(COALESCE(reason, reject_reason, ''), 300) AS summary
+             FROM ads_actions ORDER BY action_id DESC LIMIT $1`, [limit])),
+  ]);
+  return [...(Array.isArray(a) ? a : []), ...(Array.isArray(b) ? b : [])]
+    .sort((x, y) => new Date(y.at) - new Date(x.at)).slice(0, limit);
+}
 
-route('GET', /^\/api\/agents\/([\w-]+)$/, async (m) => {
-  const a = await q1(`SELECT name, label_ar, description_ar, model, enabled, schedule, managed_by, output_kind, system_prompt, think, temperature, num_ctx
-                      FROM wameed.agents WHERE name = $1`, [m[1]]);
-  if (!a) throw Object.assign(new Error('وكيل غير موجود'), { code: 404 });
-  return a;
+route('GET', /^\/api\/events$/, async () => recentEvents(100));
+
+route('GET', /^\/api\/approvals$/, async () => {
+  await q(`UPDATE biz_approvals SET status = 'expired' WHERE status = 'pending' AND now() > expires_at`); // نفس ما يفعله /pending
+  return {
+    pending: await q(`SELECT id, agent, action_type, summary, payload, amount, created_at, expires_at
+                      FROM biz_approvals WHERE status = 'pending' ORDER BY id`),
+    recent: await q(`SELECT id, agent, action_type, summary, amount, status, created_at, decided_at, executed_at, result
+                     FROM biz_approvals WHERE status <> 'pending' ORDER BY id DESC LIMIT 40`),
+    can_approve: !!GATE_HOOK,
+  };
 });
 
-route('PATCH', /^\/api\/agents\/([\w-]+)$/, async (m, b) => {
-  const allowed = { enabled: 'boolean', schedule: 'string', model: 'string', system_prompt: 'string' };
-  const sets = [], vals = [m[1]];
-  for (const [k, t] of Object.entries(allowed)) {
-    if (!(k in b)) continue;
-    let v = b[k];
-    if (k === 'schedule' && (v === '' || v === null)) v = null;
-    else if (typeof v !== t) throw new Error('قيمة غير صالحة: ' + k);
-    if (k === 'schedule' && v !== null && !/^(daily@\d{2}:\d{2}|weekly@(sat|sun|mon|tue|wed|thu|fri)@\d{2}:\d{2}|hourly@\d{1,2})$/.test(v))
-      throw new Error('صيغة الموعد: daily@07:00 أو weekly@sat@03:00 أو hourly@15');
-    vals.push(v); sets.push(`${k} = $${vals.length}`);
-  }
-  if (!sets.length) throw new Error('لا يوجد تعديل');
-  const r = await q1(`UPDATE wameed.agents SET ${sets.join(', ')}, updated_at = now() WHERE name = $1 RETURNING name`, vals);
-  if (!r) throw Object.assign(new Error('وكيل غير موجود'), { code: 404 });
-  await q(`SELECT wameed.log_event('info', 'dashboard', 'تعديل وكيل ' || $1 || ': ' || $2)`, [m[1], Object.keys(b).join('، ')]);
+// الرفض: نفس استعلام «Save Decision» في SYS - Approval Gate حرفيًا
+route('POST', /^\/api\/approvals\/(\d+)\/reject$/, async (m) => {
+  const r = await q(`
+    WITH u AS (UPDATE biz_approvals SET status = $2, decided_at = now() WHERE id = $1 AND status = 'pending' RETURNING id)
+    INSERT INTO biz_audit_log (agent, event, approval_id, details)
+    SELECT 'gate', 'decision:' || $2, $1, $3::jsonb FROM u RETURNING approval_id`,
+    [Number(m[1]), 'rejected', JSON.stringify({ via: 'dashboard' })]);
+  if (!r.length) throw new Error('الطلب لم يعد بانتظار القرار');
   return { ok: true };
 });
 
-route('POST', /^\/api\/agents\/([\w-]+)\/run$/, async (m, b) => {
-  const a = await q1(`SELECT name, managed_by, enabled FROM wameed.agents WHERE name = $1`, [m[1]]);
-  if (!a) throw Object.assign(new Error('وكيل غير موجود'), { code: 404 });
-  if (a.managed_by !== 'runner') throw new Error('هذا الوكيل يعمل من workflow خاص به');
-  if (a.name === 'customer_service') throw new Error('خدمة العملاء تعمل عند وصول رسالة واتساب فقط');
-  const extra = {};
-  if (typeof b.owner_notes === 'string') extra.owner_notes = b.owner_notes.slice(0, 500);
-  const r = await callN8n('wameed-run', { agent: a.name, trigger: 'dashboard', extra });
-  if (!r.ok) throw new Error(r.error);
-  return { ok: true, message: 'بدأ التشغيل، والنتيجة تظهر في السجل خلال دقيقة أو اثنتين' };
+// الموافقة: لا ننفّذ شيئًا هنا. نمرّرها إلى البوابة الموجودة لتطبّق حواجزها وتنفّذ في Manager.io كما تفعل مع زر تيليجرام.
+route('POST', /^\/api\/approvals\/(\d+)\/approve$/, async (m) => {
+  if (!GATE_HOOK) throw new Error('الموافقة من زر تيليجرام حاليًا، حتى يُربط زر اللوحة بالبوابة');
+  const id = Number(m[1]);
+  const row = (await q(`SELECT status, now() > expires_at AS expired FROM biz_approvals WHERE id = $1`, [id]))[0];
+  if (!row || row.status !== 'pending' || row.expired) throw new Error('الطلب لم يعد بانتظار القرار');
+  const r = await fetchJson(GATE_HOOK, {
+    method: 'POST', headers: { 'content-type': 'application/json', 'x-wameed-token': GATE_TOKEN },
+    body: JSON.stringify({ approval_id: id, decision: 'approved', via: 'dashboard' }),
+  }, 30000).catch(e => ({ ok: false, status: errMsg(e) }));
+  if (!r.ok) throw new Error('البوابة لم تستلم الموافقة: ' + r.status);
+  // البوابة قد تعتمد وتنفّذ، أو تحجب الطلب لتجاوز السقف، أو ترفض لأن المنظومة موقوفة: نعيد ما قررته هي
+  const after = (await q(`SELECT status, result FROM biz_approvals WHERE id = $1`, [id]))[0] || {};
+  return { ok: true, status: after.status, result: after.result };
 });
 
-route('GET', /^\/api\/actions$/, async (m, b, url) => {
-  const status = url.searchParams.get('status') || 'pending';
-  const where = status === 'pending' ? `a.status = 'pending'`
-              : status === 'manual' ? `a.status = 'needs_manual'`
-              : `true`;
-  return q(`
-    SELECT a.id, a.agent, ag.label_ar AS agent_label, a.type, p.label_ar AS type_label, p.executor, a.reason, a.payload,
-           a.total_sar, a.status, a.gate_reason, a.decided_via, a.created_at, a.expires_at, a.decided_at, a.executed_at, a.result,
-           CASE WHEN a.status = 'pending' THEN wameed.approval_text(a.id) END AS preview
-    FROM wameed.actions a
-    LEFT JOIN wameed.agents ag ON ag.name = a.agent
-    LEFT JOIN wameed.action_policies p ON p.action_type = a.type
-    WHERE ${where}
-    ORDER BY a.id DESC LIMIT 100`);
+route('GET', /^\/api\/workflows$/, async () => qn(`
+  SELECT w.id, w.name, w.active, w.description, w."updatedAt" AS updated_at,
+         e.status AS last_status, e."startedAt" AS last_at, e.mode AS last_mode,
+         s.runs7, s.errors7
+  FROM workflow_entity w
+  LEFT JOIN LATERAL (SELECT status, "startedAt", mode FROM execution_entity x
+                     WHERE x."workflowId" = w.id AND x."deletedAt" IS NULL ORDER BY x.id DESC LIMIT 1) e ON true
+  LEFT JOIN LATERAL (SELECT count(*)::int AS runs7, count(*) FILTER (WHERE status IN ('error', 'crashed'))::int AS errors7
+                     FROM execution_entity x WHERE x."workflowId" = w.id AND x."startedAt" > now() - interval '7 days') s ON true
+  WHERE NOT COALESCE(w."isArchived", false)
+  ORDER BY w.name`));
+
+route('GET', /^\/api\/ads$/, async () => {
+  const [runs, actions, state] = await Promise.all([
+    qa(`SELECT run_id, run_type, status, dry_run, started_at, finished_at, left(summary, 1500) AS summary, left(error, 500) AS error
+        FROM ads_runs ORDER BY run_id DESC LIMIT 30`),
+    qa(`SELECT action_id, run_id, created_at, action_type, payload, reason, source, status, reject_reason, undone_at
+        FROM ads_actions ORDER BY action_id DESC LIMIT 60`),
+    qa(`SELECT key, left(value::text, 200) AS value, updated_at FROM ads_state ORDER BY key`),
+  ]);
+  return { runs, actions, state: state.filter(s => !/token|secret|key|password|update/i.test(s.key)) };
 });
 
-route('POST', /^\/api\/actions\/(\d+)\/decide$/, async (m, b) => {
-  if (!['approve', 'reject'].includes(b.decision)) throw new Error('القرار: approve أو reject');
-  let row;
-  try { row = await q1(`SELECT * FROM wameed.decide_action($1, $2, 'dashboard', 'owner')`, [m[1], b.decision]); }
-  catch (e) { throw new Error(e.message); }
-  let exec = null;
-  if (row.status === 'approved') exec = await callN8n('wameed-execute', { action_id: Number(m[1]) });
-  return { ok: true, status: row.status, gate_reason: row.gate_reason, exec };
-});
+route('GET', /^\/api\/guardrails$/, async () => q(`SELECT key, value::text AS value FROM biz_guardrails ORDER BY key`));
 
-route('POST', /^\/api\/actions\/(\d+)\/done$/, async (m) => {
-  // المالك أكّد أنه نفّذ المهمة اليدوية (مثل إدخال أمر الشراء في Manager.io)
-  const r = await q1(`UPDATE wameed.actions SET status = 'executed', result = COALESCE(result, '{}') || '{"manual_done": true}'::jsonb
-                      WHERE id = $1 AND status = 'needs_manual' RETURNING id`, [m[1]]);
-  if (!r) throw new Error('ليست مهمة يدوية مفتوحة');
+route('PUT', /^\/api\/guardrails\/([\w.-]+)$/, async (m, b) => {
+  const v = Number(b.value);
+  if (!isFinite(v) || v < 0) throw new Error('القيمة يجب أن تكون رقمًا موجبًا');
+  const cur = (await q(`SELECT value::text AS value FROM biz_guardrails WHERE key = $1`, [m[1]]))[0];
+  if (!cur) throw Object.assign(new Error('حاجز غير معروف'), { code: 404 });
+  // نُبقي صيغة القيمة كما هي في الجدول (نص أو رقم أو JSON)، فالـ workflows تقرؤها بـ value::text::int
+  await q(`UPDATE biz_guardrails SET value = $2 WHERE key = $1`, [m[1], String(v)]);
+  await q(`INSERT INTO biz_audit_log (agent, event, details) VALUES ('dashboard', 'guardrail:' || $1, $2::jsonb)`,
+          [m[1], JSON.stringify({ from: cur.value, to: v })]);
   return { ok: true };
 });
 
-route('GET', /^\/api\/runs$/, async (m, b, url) => {
-  const agent = url.searchParams.get('agent');
-  return q(`SELECT r.id, r.agent, a.label_ar AS agent_label, r.trigger, r.status, r.model, r.started_at, r.duration_ms,
-                   r.summary, r.risks, r.missing_data, r.error,
-                   (SELECT count(*) FROM wameed.actions x WHERE x.run_id = r.id)::int AS actions
-            FROM wameed.agent_runs r LEFT JOIN wameed.agents a ON a.name = r.agent
-            WHERE ($1::text IS NULL OR r.agent = $1)
-            ORDER BY r.id DESC LIMIT 60`, [agent]);
-});
-
-route('GET', /^\/api\/runs\/(\d+)$/, async (m) => {
-  const r = await q1(`SELECT * FROM wameed.agent_runs WHERE id = $1`, [m[1]]);
-  if (!r) throw Object.assign(new Error('غير موجود'), { code: 404 });
-  r.actions = await q(`SELECT id, type, status, gate_reason, total_sar FROM wameed.actions WHERE run_id = $1 ORDER BY id`, [m[1]]);
-  return r;
-});
-
-route('GET', /^\/api\/events$/, async () => q(`SELECT * FROM wameed.events ORDER BY id DESC LIMIT 100`));
-
-route('GET', /^\/api\/config$/, async () => ({
-  config: await q(`SELECT key, value, label_ar, group_ar, sort, updated_at, updated_by FROM wameed.config ORDER BY sort, key`),
-  policies: await q(`SELECT * FROM wameed.action_policies ORDER BY mode, action_type`),
-}));
-
-route('PUT', /^\/api\/config\/([\w-]+)$/, async (m, b) => {
-  if (!('value' in b)) throw new Error('value مطلوب');
-  const cur = await q1(`SELECT value FROM wameed.config WHERE key = $1`, [m[1]]);
-  if (!cur) throw Object.assign(new Error('إعداد غير معروف'), { code: 404 });
-  const typeOf = v => Array.isArray(v) ? 'array' : v === null ? 'null' : typeof v;
-  if (typeOf(cur.value) !== typeOf(b.value)) throw new Error('نوع القيمة يجب أن يبقى ' + typeOf(cur.value));
-  if (typeof b.value === 'number' && (!(b.value >= 0) || !isFinite(b.value))) throw new Error('رقم غير صالح');
-  await q(`SELECT wameed.set_config_value($1, $2::jsonb, 'dashboard')`, [m[1], JSON.stringify(b.value)]);
-  return { ok: true };
-});
-
+// الإيقاف: نفس ما يكتبه أمر /stop في تيليجرام (BIZ)، ونفس مفتاح وكيل الإعلانات (ADS)
 route('POST', /^\/api\/pause$/, async (m, b) => {
   const paused = !!b.paused;
-  await q(`SELECT wameed.set_config_value('system_paused', $1::jsonb, 'dashboard')`, [JSON.stringify(paused)]);
-  callN8n('wameed-notify', { text: paused ? '⛔ أوقفت المنظومة من لوحة التحكم: لا تشغيل ولا تنفيذ حتى الاستئناف.' : '▶️ استُؤنفت المنظومة من لوحة التحكم.' });
-  return { ok: true, paused };
-});
-
-route('GET', /^\/api\/data$/, async () => ({
-  suppliers: await q(`SELECT * FROM wameed.suppliers ORDER BY whitelisted DESC, name`),
-  stock: await q(`SELECT item_key, name, category, unit, qty_on_hand, reorder_level, avg_daily_sales, cost, price, preferred_supplier, updated_at
-                  FROM wameed.stock_items ORDER BY name LIMIT 500`),
-}));
-
-route('PUT', /^\/api\/suppliers$/, async (m, b) => {
-  if (!b.name || typeof b.name !== 'string') throw new Error('اسم المورد مطلوب');
-  await q(`INSERT INTO wameed.suppliers (name, whitelisted, whatsapp, email, notes) VALUES ($1, $2, $3, $4, $5)
-           ON CONFLICT (name) DO UPDATE SET whitelisted = EXCLUDED.whitelisted, whatsapp = EXCLUDED.whatsapp,
-             email = EXCLUDED.email, notes = EXCLUDED.notes`,
-          [b.name.trim(), !!b.whitelisted, b.whatsapp || null, b.email || null, b.notes || null]);
-  await q(`SELECT wameed.log_event('info', 'dashboard', 'تحديث مورد: ' || $1 || CASE WHEN $2 THEN ' (معتمد)' ELSE ' (غير معتمد)' END)`, [b.name, !!b.whitelisted]);
-  return { ok: true };
+  const which = ['biz', 'ads', 'all'].includes(b.system) ? b.system : 'all';
+  if (which !== 'ads') {
+    await q(`INSERT INTO biz_state (key, value, updated_at) VALUES ('system_paused', $1, now())
+             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, [paused ? 'true' : 'false']);
+    await q(`INSERT INTO biz_audit_log (agent, event, details) VALUES ('dashboard', $1, '{"via":"dashboard"}'::jsonb)`,
+            [paused ? '/stop' : '/resume']);
+  }
+  if (which !== 'biz') {
+    await qa(`INSERT INTO ads_state (key, value, updated_at) VALUES ('system_paused', $1::jsonb, now())
+              ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, [paused ? 'true' : 'false']);
+  }
+  return { ok: true, paused: await pausedState() };
 });
 
 // ---------- الملفات الثابتة ----------

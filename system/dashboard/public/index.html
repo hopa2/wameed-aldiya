@@ -16,7 +16,7 @@
   <form id="loginForm" class="card login-card">
     <img src="icon.svg" alt="" width="56" height="56">
     <h1>لوحة وميض الضياء</h1>
-    <p class="muted">منظومة الوكلاء على جهازك</p>
+    <p class="muted">لوحة فوق منظومتك على اللابتوب</p>
     <input id="pw" type="password" autocomplete="current-password" placeholder="كلمة السر" required>
     <button class="btn primary" type="submit">دخول</button>
     <p id="loginErr" class="err"></p>
@@ -33,6 +33,7 @@
     <a href="#home" data-tab="home">الرئيسية</a>
     <a href="#approvals" data-tab="approvals">الموافقات <b id="pendingBadge" class="badge hidden">0</b></a>
     <a href="#agents" data-tab="agents">الوكلاء</a>
+    <a href="#ads" data-tab="ads">الإعلانات</a>
     <a href="#log" data-tab="log">السجل</a>
     <a href="#settings" data-tab="settings">الإعدادات</a>
   </nav>
@@ -41,7 +42,6 @@
   <div id="toast" class="toast hidden"></div>
 </div>
 
-<dialog id="dlg"><div id="dlgBody"></div><form method="dialog"><button class="btn">إغلاق</button></form></dialog>
 <script src="app.js"></script>
 </body>
 </html>
