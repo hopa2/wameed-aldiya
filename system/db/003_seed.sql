@@ -18,7 +18,7 @@ INSERT INTO config (key, value, label_ar, group_ar, sort) VALUES
   ('max_items_per_batch',        '5',      'أصناف كل دفعة تسعير', 'التسعير', 22),
   ('reorder_cover_days',         '14',     'أيام التغطية لإعادة الطلب', 'المخزون', 30),
   ('whatsapp_max_replies_per_hour', '30',  'أقصى ردود واتساب في الساعة', 'واتساب', 40),
-  ('waha_url',                   '"http://SYNOLOGY-TAILSCALE-IP:3000"', 'عنوان WAHA على Synology', 'واتساب', 41),
+  ('waha_url',                   '"http://100.104.121.101:3000"', 'عنوان WAHA على Synology', 'واتساب', 41),
   ('waha_session',               '"default"', 'اسم جلسة WAHA', 'واتساب', 42),
   ('ollama_url',                 '"http://host.docker.internal:11434"', 'عنوان Ollama', 'النماذج', 50),
   ('drafts_count',               '3',      'عدد مسودات التسويق', 'التسويق', 60),
