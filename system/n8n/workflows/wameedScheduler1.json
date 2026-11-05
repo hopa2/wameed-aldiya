@@ -1,0 +1,136 @@
+{
+  "id": "wameedScheduler1",
+  "name": "وميض | المجدول (كل 5 دقائق)",
+  "nodes": [
+    {
+      "id": "692756f3-f63a-50f0-ab65-fad506305a33",
+      "name": "كل 5 دقائق",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        300
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "695743d0-3bbc-5c20-872d-0edcb8737e82",
+      "name": "الوكلاء المستحقون",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        480,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM wameed.claim_due_agents()",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "wameedPostgres01",
+          "name": "Wameed Postgres"
+        }
+      }
+    },
+    {
+      "id": "78e32309-8930-504e-8dee-87936ae5ce63",
+      "name": "تشغيل",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5678/webhook/wameed-run",
+        "options": {
+          "timeout": 60000
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ agent: $json.agent, trigger: 'schedule' }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "wameedHookToken1",
+          "name": "Wameed Hook Token"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "8f2636c7-c083-5ca9-9c7a-28226859b81a",
+      "name": "انتهاء المهل",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        480,
+        500
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT wameed.expire_actions() AS expired",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "wameedPostgres01",
+          "name": "Wameed Postgres"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "كل 5 دقائق": {
+      "main": [
+        [
+          {
+            "node": "الوكلاء المستحقون",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "انتهاء المهل",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "الوكلاء المستحقون": {
+      "main": [
+        [
+          {
+            "node": "تشغيل",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "pinData": {},
+  "versionId": "257273f0-eee8-513f-84d3-f3c3e3ee807d",
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Riyadh",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true
+  },
+  "tags": []
+}

@@ -1,0 +1,53 @@
+# ============================================================
+# إضافة منظومة وميض الضياء فوق docker-compose.yml الموجود في C:\wameed
+# (n8n + postgres كما في ملف وكيل الإعلانات). لا يغيّر شيئًا في الخدمتين
+# إلا إضافة متغيرات وقراءة مجلد المنظومة داخل n8n.
+#
+# التفعيل: في C:\wameed\.env أضف السطر:
+#   COMPOSE_FILE=docker-compose.yml;wameed-aldiya/system/docker-compose.wameed.yml
+# ثم: docker compose up -d --build
+# (المسارات النسبية هنا تُحسب من C:\wameed، مجلد الملف الأول)
+# ============================================================
+services:
+  n8n:
+    environment:
+      WAMEED_HOOK_TOKEN: ${WAMEED_HOOK_TOKEN:?ضع WAMEED_HOOK_TOKEN في .env}
+      WAHA_API_KEY: ${WAHA_API_KEY:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+    volumes:
+      - ${WAMEED_SYSTEM_DIR:-./wameed-aldiya/system}:/wameed:ro
+
+  # يطبّق مخطط wameed على Postgres ثم يخرج. آمن للتكرار، ولا يكتب فوق تعديلاتك.
+  wameed-migrate:
+    image: ${WAMEED_PG_IMAGE:-postgres:16}
+    restart: "no"
+    depends_on: [postgres]
+    environment:
+      PGHOST: postgres
+      PGUSER: wameed
+      PGDATABASE: n8n
+      PGPASSWORD: ${PG_PASSWORD}
+    volumes:
+      - ${WAMEED_SYSTEM_DIR:-./wameed-aldiya/system}/db:/db:ro
+    entrypoint: ["sh", "-c"]
+    command:
+      - 'until pg_isready -q; do sleep 2; done; for f in /db/0*.sql; do psql -v ON_ERROR_STOP=1 -q -f "$$f" || exit 1; done; echo "wameed schema OK"'
+
+  wameed-dashboard:
+    build: ${WAMEED_SYSTEM_DIR:-./wameed-aldiya/system}/dashboard
+    image: wameed-dashboard:local
+    restart: unless-stopped
+    depends_on: [postgres, n8n]
+    environment:
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:?ضع DASHBOARD_PASSWORD في .env}
+      WAMEED_HOOK_TOKEN: ${WAMEED_HOOK_TOKEN}
+      N8N_INTERNAL_URL: http://n8n:5678
+      PGHOST: postgres
+      PGUSER: wameed
+      PGDATABASE: n8n
+      PGPASSWORD: ${PG_PASSWORD}
+      TZ: Asia/Riyadh
+    ports:
+      - "127.0.0.1:8080:8080"     # من الجوال: عبر tailscale serve فقط (انظر الدليل)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # لقراءة حالة Ollama

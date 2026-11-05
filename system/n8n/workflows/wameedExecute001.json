@@ -1,0 +1,519 @@
+{
+  "id": "wameedExecute001",
+  "name": "وميض | تنفيذ إجراء معتمد",
+  "nodes": [
+    {
+      "id": "2b96e107-9942-5457-97c4-7e8c9052bfec",
+      "name": "طلب تنفيذ",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "wameed-execute",
+        "authentication": "headerAuth",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "wameedHookToken1",
+          "name": "Wameed Hook Token"
+        }
+      },
+      "webhookId": "91d9f4b2-653f-55f7-a13e-daf814f452cb"
+    },
+    {
+      "id": "9c3687be-c2f3-5ad9-808d-eefb84754d9e",
+      "name": "حجز الإجراء",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        480,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "\nSELECT c.*, wameed.cfg_text('waha_url') AS waha_url, wameed.cfg_text('waha_session') AS waha_session\nFROM wameed.claim_action($1::bigint) c",
+        "options": {
+          "queryReplacement": "={{ [ $json.body.action_id ] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "wameedPostgres01",
+          "name": "Wameed Postgres"
+        }
+      }
+    },
+    {
+      "id": "e45e5dea-66be-5aa9-a66d-a95cdead7217",
+      "name": "المنفّذ",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        720,
+        300
+      ],
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 4,
+        "output": "={{ ({ whatsapp: 0, telegram: 1, manual: 2 })[$json.executor] ?? 3 }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "3a2c8295-c1f1-5a1b-a466-c3c3fa162d3e",
+      "name": "تجهيز رسالة واتساب",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const a = $input.first().json;\nconst p = a.payload || {};\nconst chatId = p.chat_id || (String(p.to || '').replace(/\\D/g, '') + '@c.us');\nreturn [{ json: { ...a, chatId, text: p.text, delay: a.type === 'whatsapp_reply' ? 3 + Math.floor(Math.random() * 6) : 1 } }];"
+      }
+    },
+    {
+      "id": "5791db1e-8999-518d-ab56-2b2d5ade1214",
+      "name": "تأخير طبيعي",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1200,
+        300
+      ],
+      "parameters": {
+        "amount": "={{ $json.delay }}",
+        "unit": "seconds"
+      },
+      "webhookId": "81b3e047-d480-54a5-9b0c-684da87b5df1"
+    },
+    {
+      "id": "edcfe878-eb19-5fab-b7b6-8088c82afe35",
+      "name": "WAHA إرسال",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.waha_url }}/api/sendText",
+        "options": {
+          "timeout": 30000
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ session: $json.waha_session, chatId: $json.chatId, text: $json.text }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "wameedWahaKey001",
+          "name": "Wameed WAHA Key"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "5514e623-2af1-57cc-ba7d-610c7d23e85e",
+      "name": "إنهاء واتساب",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1680,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT (wameed.finish_action($1::bigint, $2, $3::jsonb)).id AS id",
+        "options": {
+          "queryReplacement": "={{ [ $('حجز الإجراء').first().json.id, $json.error ? 'failed' : 'executed', $json.error ? { error: String($json.error.message || $json.error) } : { sent: true, id: $json.id ?? null } ] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "wameedPostgres01",
+          "name": "Wameed Postgres"
+        }
+      }
+    },
+    {
+      "id": "14676c90-b568-5d08-8015-c9d2a228ec74",
+      "name": "نص التنبيه",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const a = $input.first().json;\nconst p = a.payload || {};\nlet text = p.text || '';\nif (a.type === 'whatsapp_escalation') {\n  const num = String(p.chat_id || '').replace(/@.*/, '');\n  text = '📞 عميل يحتاجك على واتساب\\n' + (p.owner_note || '') + '\\nرسالته: ' + (p.customer_text || '') + '\\nhttps://wa.me/' + num;\n}\nreturn [{ json: { ...a, text } }];"
+      }
+    },
+    {
+      "id": "f7bd731b-a3c4-51c6-a844-1e545aca48e6",
+      "name": "إرسال التنبيه",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2160,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5678/webhook/wameed-notify",
+        "options": {
+          "timeout": 60000
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: $json.text }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "wameedHookToken1",
+          "name": "Wameed Hook Token"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "4ea0e1fb-b77d-5422-83cc-27426617d7dd",
+      "name": "إنهاء التنبيه",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2400,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT (wameed.finish_action($1::bigint, $2, $3::jsonb)).id AS id",
+        "options": {
+          "queryReplacement": "={{ [ $('حجز الإجراء').first().json.id, $json.error ? 'failed' : 'executed', $json.error ? { error: String($json.error.message || $json.error) } : { notified: true } ] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "wameedPostgres01",
+          "name": "Wameed Postgres"
+        }
+      }
+    },
+    {
+      "id": "7005aaf5-9595-59b5-b090-b3dc727bd666",
+      "name": "نص المهمة اليدوية",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2640,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT wameed.manual_task_text($1::bigint) AS text",
+        "options": {
+          "queryReplacement": "={{ [ $json.id ] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "wameedPostgres01",
+          "name": "Wameed Postgres"
+        }
+      }
+    },
+    {
+      "id": "dd82a523-7dad-5979-a48d-70369c9108ec",
+      "name": "إرسال المهمة",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2880,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5678/webhook/wameed-notify",
+        "options": {
+          "timeout": 60000
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: $json.text }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "wameedHookToken1",
+          "name": "Wameed Hook Token"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "a792ccb5-0781-51c1-ba7b-cbb653811b75",
+      "name": "إنهاء يدوي",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        3120,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "\nSELECT (wameed.finish_action($1::bigint, 'needs_manual', '{\"note\":\"بانتظار التنفيذ اليدوي\"}'::jsonb)).id AS id,\n       $2::text AS type",
+        "options": {
+          "queryReplacement": "={{ [ $('حجز الإجراء').first().json.id, $('حجز الإجراء').first().json.type ] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "wameedPostgres01",
+          "name": "Wameed Postgres"
+        }
+      }
+    },
+    {
+      "id": "ed16d694-c9c1-576a-b6dd-7072f7e6d596",
+      "name": "أمر شراء؟ ← وكيل الموردين",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3360,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const j = $input.first().json;\nreturn j.type === 'create_purchase_order' ? [{ json: { action_id: j.id } }] : [];"
+      }
+    },
+    {
+      "id": "137e3c06-26d8-511c-8b87-b54b59b3e6a7",
+      "name": "تشغيل وكيل الموردين",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3600,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5678/webhook/wameed-run",
+        "options": {
+          "timeout": 60000
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ agent: 'supplier_agent', trigger: 'chain', extra: { action_id: $json.action_id } }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "wameedHookToken1",
+          "name": "Wameed Hook Token"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "9d28a312-7871-550a-89da-4bb96955d1bc",
+      "name": "إنهاء خارجي",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        3840,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT (wameed.finish_action($1::bigint, 'executed', '{\"by\":\"external\"}'::jsonb)).id AS id",
+        "options": {
+          "queryReplacement": "={{ [ $json.id ] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "wameedPostgres01",
+          "name": "Wameed Postgres"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "طلب تنفيذ": {
+      "main": [
+        [
+          {
+            "node": "حجز الإجراء",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "حجز الإجراء": {
+      "main": [
+        [
+          {
+            "node": "المنفّذ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "المنفّذ": {
+      "main": [
+        [
+          {
+            "node": "تجهيز رسالة واتساب",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "نص التنبيه",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "نص المهمة اليدوية",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "إنهاء خارجي",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "تجهيز رسالة واتساب": {
+      "main": [
+        [
+          {
+            "node": "تأخير طبيعي",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "تأخير طبيعي": {
+      "main": [
+        [
+          {
+            "node": "WAHA إرسال",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WAHA إرسال": {
+      "main": [
+        [
+          {
+            "node": "إنهاء واتساب",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "نص التنبيه": {
+      "main": [
+        [
+          {
+            "node": "إرسال التنبيه",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "إرسال التنبيه": {
+      "main": [
+        [
+          {
+            "node": "إنهاء التنبيه",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "نص المهمة اليدوية": {
+      "main": [
+        [
+          {
+            "node": "إرسال المهمة",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "إرسال المهمة": {
+      "main": [
+        [
+          {
+            "node": "إنهاء يدوي",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "إنهاء يدوي": {
+      "main": [
+        [
+          {
+            "node": "أمر شراء؟ ← وكيل الموردين",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "أمر شراء؟ ← وكيل الموردين": {
+      "main": [
+        [
+          {
+            "node": "تشغيل وكيل الموردين",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "pinData": {},
+  "versionId": "be81c9f4-914d-5519-ae1c-a4fe7bafac7d",
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Riyadh",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true
+  },
+  "tags": []
+}

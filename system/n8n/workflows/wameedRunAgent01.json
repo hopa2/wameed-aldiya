@@ -1,0 +1,466 @@
+{
+  "id": "wameedRunAgent01",
+  "name": "وميض | تشغيل وكيل",
+  "nodes": [
+    {
+      "id": "855a6e98-116d-554b-a8cf-8b9aa0cf3028",
+      "name": "طلب تشغيل",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "wameed-run",
+        "authentication": "headerAuth",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "wameedHookToken1",
+          "name": "Wameed Hook Token"
+        }
+      },
+      "webhookId": "8bd49126-c756-5b4c-aeeb-7c89e6ff8b6c"
+    },
+    {
+      "id": "9d0f758f-88bb-5bf4-afcf-d085028345ed",
+      "name": "قراءة الطلب",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const b = $input.first().json.body || {};\nif (!b.agent || typeof b.agent !== 'string') throw new Error('agent مطلوب');\nreturn [{ json: {\n  agent: b.agent,\n  trigger: b.trigger || 'manual',\n  input: (b.input && typeof b.input === 'object') ? b.input : null,\n  extra: (b.extra && typeof b.extra === 'object') ? b.extra : {},\n  envelope: (b.envelope && typeof b.envelope === 'object') ? b.envelope : null,\n}}];"
+      }
+    },
+    {
+      "id": "180a41d3-d795-5e73-a6e3-d5de9d4f968c",
+      "name": "تحميل الوكيل والسياق",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        720,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "\nSELECT a.name, a.label_ar, a.model, a.think, a.temperature, a.num_ctx, a.output_kind, a.system_prompt,\n       a.managed_by, a.enabled,\n       wameed.cfg_bool('system_paused') AS paused,\n       wameed.cfg_text('constitution') AS constitution,\n       wameed.cfg_text('ollama_url') AS ollama_url,\n       wameed.agent_context(a.name, $2::jsonb) AS ctx\nFROM wameed.agents a WHERE a.name = $1",
+        "options": {
+          "queryReplacement": "={{ [ $json.agent, $json.extra ] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "wameedPostgres01",
+          "name": "Wameed Postgres"
+        }
+      }
+    },
+    {
+      "id": "31c2d080-8abb-5f2f-ad7f-e3d1fc625a09",
+      "name": "بناء الاستدعاء",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const req = $('قراءة الطلب').first().json;\nconst a = $input.first().json;\nconst out = { agent: a.name, label: a.label_ar, trigger: req.trigger, kind: a.output_kind, model: a.model };\n\nif (req.envelope) return [{ json: { ...out, mode: 'ingest', model: 'external', envelope: req.envelope, input: req.input } }];\nif (a.paused)   return [{ json: { ...out, mode: 'skip', why: 'النظام موقوف' } }];\nif (!a.enabled) return [{ json: { ...out, mode: 'skip', why: 'الوكيل معطل من لوحة التحكم' } }];\nif (a.managed_by !== 'runner') return [{ json: { ...out, mode: 'skip', why: 'وكيل خارجي: يرسل envelope فقط' } }];\n\nconst ctx = Object.assign({}, a.ctx || {}, req.input || {});\n\n// يعوّض {{ $json.x }} و{{ JSON.stringify($json.x) }} و{{ $now... }} في نص الأمر\nfunction render(tpl) {\n  return String(tpl || '').replace(/\\{\\{\\s*([^}]+?)\\s*\\}\\}/g, (m, expr) => {\n    let e = expr.trim(), stringify = false;\n    const js = e.match(/^JSON\\.stringify\\((.+)\\)$/);\n    if (js) { e = js[1].trim(); stringify = true; }\n    if (e.startsWith('$now')) return ctx.now || '';\n    const p = e.match(/^\\$json\\.([\\w.]+)$/);\n    if (!p) return m;\n    const v = p[1].split('.').reduce((o, k) => (o == null ? undefined : o[k]), ctx);\n    if (v === undefined || v === null) return 'غير متوفر';\n    return (stringify || typeof v === 'object') ? JSON.stringify(v) : String(v);\n  });\n}\n\nconst S = { type: 'string' };\nconst SCHEMAS = {\n  envelope: { type: 'object', required: ['agent', 'status', 'summary', 'actions', 'risks', 'missing_data'],\n    properties: { agent: S, status: { type: 'string', enum: ['ok', 'needs_data', 'paused', 'error'] }, summary: S,\n      actions: { type: 'array', items: { type: 'object', required: ['type', 'needs_approval', 'reason', 'payload'],\n        properties: { type: S, needs_approval: { type: 'boolean' }, reason: S, payload: { type: 'object' } } } },\n      risks: { type: 'array', items: S }, missing_data: { type: 'array', items: S } } },\n  whatsapp: { type: 'object', required: ['intent', 'confidence', 'escalate', 'escalate_reason', 'reply', 'owner_note'],\n    properties: { intent: { type: 'string', enum: ['price', 'availability', 'hours', 'location', 'greeting', 'other'] },\n      confidence: { type: 'string', enum: ['high', 'medium', 'low'] }, escalate: { type: 'boolean' },\n      escalate_reason: S, reply: S, owner_note: S } },\n  orchestrator: { type: 'object', required: ['reply_to_owner', 'approvals', 'followups'],\n    properties: { reply_to_owner: S, approvals: { type: 'array', items: { type: 'object' } }, followups: { type: 'array', items: S } } },\n};\nconst NOTE = {\n  envelope: '',\n  whatsapp: 'رسالة العميل الحالية في customer_message.',\n  orchestrator: 'هذا موجز الصباح المجدول. تقارير الوكلاء جاهزة في agent_reports (اسم الوكيل ← ملخصه)، فلا تستدعِ أدوات؛ اكتب reply_to_owner منها فقط، واجعل approvals فارغة، وعدد الطلبات المنتظرة في pending_approvals.',\n};\n\nconst system = [render(a.constitution), render(a.system_prompt)].filter(Boolean).join('\\n\\n');\nconst user = 'البيانات:\\n' + JSON.stringify(ctx) + (NOTE[a.output_kind] ? '\\n\\n' + NOTE[a.output_kind] : '') + (a.think ? '' : ' /no_think');\n\nreturn [{ json: { ...out, mode: 'llm', input: ctx, ollama_url: a.ollama_url, started: Date.now(),\n  ollama_body: { model: a.model, stream: false, think: !!a.think, format: SCHEMAS[a.output_kind] || SCHEMAS.envelope,\n    options: { num_ctx: a.num_ctx, temperature: Number(a.temperature) },\n    messages: [{ role: 'system', content: system }, { role: 'user', content: user }] } } }];"
+      }
+    },
+    {
+      "id": "ee5abd43-1a6d-5057-b439-88cd25639aa3",
+      "name": "المسار",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1200,
+        300
+      ],
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 3,
+        "output": "={{ ({ llm: 0, ingest: 1, skip: 2 })[$json.mode] }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "6034c202-2170-5841-9744-2f05598c6fbb",
+      "name": "Ollama",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.ollama_url }}/api/chat",
+        "options": {
+          "timeout": 900000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.ollama_body) }}"
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "d65900a1-a6bb-502e-a93f-6abae68b1162",
+      "name": "تحليل الرد",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const prep = $('بناء الاستدعاء').first().json;\nconst res = $input.first().json;\nlet envelope = null, error = null;\ntry {\n  if (res.error) throw new Error('Ollama: ' + (res.error.message || JSON.stringify(res.error)).slice(0, 300));\n  let txt = (res.message && res.message.content) || '';\n  txt = txt.replace(/<think>[\\s\\S]*?<\\/think>/g, '').replace(/^```(json)?|```$/g, '').trim();\n  const o = JSON.parse(txt);\n  if (prep.kind === 'whatsapp') {\n    const chat = prep.input.chat_id;\n    const info = ['price', 'availability', 'hours', 'location', 'greeting'].includes(o.intent);\n    const actions = [];\n    if (o.reply) actions.push({ type: 'whatsapp_reply', needs_approval: false, reason: 'رد على: ' + String(prep.input.customer_message || '').slice(0, 80),\n      payload: { chat_id: chat, text: o.reply, intent: o.intent, confidence: o.confidence, customer_text: prep.input.customer_message,\n                 auto_ok: !o.escalate && o.confidence === 'high' && info } });\n    if (o.escalate) actions.push({ type: 'whatsapp_escalation', needs_approval: false, reason: o.escalate_reason || 'تحويل',\n      payload: { chat_id: chat, owner_note: o.owner_note, customer_text: prep.input.customer_message } });\n    envelope = { agent: prep.agent, status: 'ok', summary: (o.escalate ? '↪️ تحويل: ' + (o.owner_note || '') : '💬 ' + o.intent + ' / ' + o.confidence),\n                 actions, risks: [], missing_data: [], raw: o };\n  } else if (prep.kind === 'orchestrator') {\n    envelope = { agent: prep.agent, status: 'ok', summary: o.reply_to_owner, risks: [], missing_data: [], raw: o,\n                 actions: [{ type: 'notify_owner', needs_approval: false, reason: 'موجز الصباح', payload: { text: o.reply_to_owner } }] };\n  } else {\n    envelope = o;\n    envelope.agent = prep.agent;\n    if (!Array.isArray(envelope.actions)) envelope.actions = [];\n  }\n} catch (e) { error = String(e.message || e).slice(0, 500); }\nreturn [{ json: { agent: prep.agent, trigger: prep.trigger, model: prep.model, kind: prep.kind,\n  duration_ms: Date.now() - prep.started, input: prep.input, envelope, error } }];"
+      }
+    },
+    {
+      "id": "66bfaaf2-cbcb-5d75-826c-2a75ad787ca0",
+      "name": "رد خارجي جاهز",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const p = $input.first().json;\nreturn [{ json: { agent: p.agent, trigger: p.trigger || 'external', model: 'external', kind: p.kind,\n                  duration_ms: null, input: p.input || null, envelope: p.envelope, error: null } }];"
+      }
+    },
+    {
+      "id": "57fff271-e82b-51a7-a107-669e6e7639e6",
+      "name": "تسجيل + بوابة التنفيذ",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2160,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT wameed.ingest_run($1, $2, $3, $4::int, $5::jsonb, $6::jsonb, $7) AS r",
+        "options": {
+          "queryReplacement": "={{ [ $json.agent, $json.trigger, $json.model, $json.duration_ms ?? null, $json.input ?? null, $json.envelope ?? null, $json.error ?? null ] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "wameedPostgres01",
+          "name": "Wameed Postgres"
+        }
+      }
+    },
+    {
+      "id": "46196894-2426-5399-befc-09610fa09b11",
+      "name": "المتابعة",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const r = $input.first().json.r;\nconst agent = r.agent;\nconst out = [];\nfor (const a of (r.actions || [])) {\n  if (a.status === 'auto_approved') out.push({ json: { kind: 'execute', action_id: a.id } });\n  if (a.status === 'pending') out.push({ json: { kind: 'pending', action_id: a.id } });\n}\nif (['error', 'invalid_output'].includes(r.status)) {\n  if (agent === 'orchestrator') out.push({ json: { kind: 'fallback', action_id: null } });\n  else out.push({ json: { kind: 'text', action_id: null, text: '⚠️ فشل تشغيل وكيل «' + agent + '» (#' + r.run_id + '). التفاصيل في لوحة التحكم.' } });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "0cba0133-da0e-5197-92bc-75546d0ee405",
+      "name": "نوع المتابعة",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        2640,
+        300
+      ],
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 2,
+        "output": "={{ $json.kind === 'execute' ? 0 : 1 }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "00ca2f29-566a-590d-a733-80e0181c7687",
+      "name": "تنفيذ تلقائي",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2880,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5678/webhook/wameed-execute",
+        "options": {
+          "timeout": 60000
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ action_id: $json.action_id }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "wameedHookToken1",
+          "name": "Wameed Hook Token"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "17f075dd-a3a6-5814-8d5d-7d14d34b99e7",
+      "name": "نص الإشعار",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        3120,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "\nSELECT CASE $1 WHEN 'pending' THEN wameed.approval_text($2::bigint)\n               WHEN 'fallback' THEN wameed.fallback_report()\n               ELSE $3 END AS text",
+        "options": {
+          "queryReplacement": "={{ [ $json.kind, $json.action_id ?? 0, $json.text ?? '' ] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "wameedPostgres01",
+          "name": "Wameed Postgres"
+        }
+      }
+    },
+    {
+      "id": "39074881-522e-5901-a855-ea32c42dde60",
+      "name": "إشعار المالك",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3360,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5678/webhook/wameed-notify",
+        "options": {
+          "timeout": 60000
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: $json.text }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "wameedHookToken1",
+          "name": "Wameed Hook Token"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "7792cc7b-472e-5ac4-bb80-2fe80eec3fcf",
+      "name": "تسجيل التخطي",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        3600,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT wameed.log_event('info', $1, 'تخطي التشغيل: ' || $2) AS ok",
+        "options": {
+          "queryReplacement": "={{ [ $json.agent, $json.why ] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "wameedPostgres01",
+          "name": "Wameed Postgres"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "طلب تشغيل": {
+      "main": [
+        [
+          {
+            "node": "قراءة الطلب",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "قراءة الطلب": {
+      "main": [
+        [
+          {
+            "node": "تحميل الوكيل والسياق",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "تحميل الوكيل والسياق": {
+      "main": [
+        [
+          {
+            "node": "بناء الاستدعاء",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "بناء الاستدعاء": {
+      "main": [
+        [
+          {
+            "node": "المسار",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "المسار": {
+      "main": [
+        [
+          {
+            "node": "Ollama",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "رد خارجي جاهز",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "تسجيل التخطي",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama": {
+      "main": [
+        [
+          {
+            "node": "تحليل الرد",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "تحليل الرد": {
+      "main": [
+        [
+          {
+            "node": "تسجيل + بوابة التنفيذ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "رد خارجي جاهز": {
+      "main": [
+        [
+          {
+            "node": "تسجيل + بوابة التنفيذ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "تسجيل + بوابة التنفيذ": {
+      "main": [
+        [
+          {
+            "node": "المتابعة",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "المتابعة": {
+      "main": [
+        [
+          {
+            "node": "نوع المتابعة",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "نوع المتابعة": {
+      "main": [
+        [
+          {
+            "node": "تنفيذ تلقائي",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "نص الإشعار",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "نص الإشعار": {
+      "main": [
+        [
+          {
+            "node": "إشعار المالك",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "pinData": {},
+  "versionId": "ee81da26-f5cd-5f54-8318-81841b1667c4",
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Riyadh",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true
+  },
+  "tags": []
+}
