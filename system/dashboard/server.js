@@ -120,7 +120,7 @@ async function live() {
         const s = await q(`SELECT max(taken_at) AS at FROM biz_manager_snapshots`).catch(() => []);
         const at = s[0]?.at;
         if (at && Date.now() - new Date(at) < 3 * 3600e3)
-          return { ok: true, detail: 'n8n قرأ منه آخر لقطة ' + new Date(at).toLocaleTimeString('ar-SA', { timeZone: 'Asia/Riyadh', hour: '2-digit', minute: '2-digit' }) + ' (اللوحة نفسها لا تصله: ' + errMsg(e) + ')' };
+          return { ok: true, detail: 'n8n قرأ منه آخر لقطة ' + new Date(at).toLocaleTimeString('ar-SA-u-nu-latn', { timeZone: 'Asia/Riyadh', hour: '2-digit', minute: '2-digit' }) + ' (اللوحة نفسها لا تصله: ' + errMsg(e) + ')' };
         return { ok: false, detail: errMsg(e) + (at ? ' · آخر لقطة ناجحة من n8n ' + new Date(at).toISOString().slice(0, 16).replace('T', ' ') : '') };
       }
     }),
