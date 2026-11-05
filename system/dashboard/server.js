@@ -86,7 +86,7 @@ async function fetchJson(url, opts = {}, ms = 4000) {
     return { ok: r.ok, status: r.status, json };
   } finally { clearTimeout(t); }
 }
-const errMsg = (e) => e.name === 'AbortError' ? 'لا يرد (انتهت المهلة)' : (e.cause?.code || e.message);
+const errMsg = (e) => e.name === 'AbortError' ? 'لا يرد (انتهت المهلة)' : (e.cause?.code || e.cause?.message || e.message);
 
 // ---------- الفحص الحي (مخزن 20 ثانية حتى لا نثقل الأجهزة) ----------
 let liveCache = { at: 0, data: null };
@@ -110,7 +110,20 @@ async function live() {
                detail: s.length ? s.map(x => `${x.name}: ${x.status}`).join('، ') : (r.ok ? 'لا توجد جلسة واتساب' : 'رد ' + r.status) };
     }),
     // أي رد HTTP يعني أن Manager.io يعمل على جهاز المحل (لا نرسل مفتاح الـ API من هنا)
-    check(async () => { const r = await fetchJson(MANAGER_URL + '/', {}, 5000); return { ok: true, detail: 'جهاز المحل يرد (' + r.status + ')' }; }),
+    // /api2/ بلا مفتاح يرد 401 فورًا، ولا نتبع أي تحويل (الصفحة الرئيسية قد تحوّل إلى localhost على جهاز المحل)
+    check(async () => {
+      try {
+        const r = await fetchJson(MANAGER_URL + '/api2/', { redirect: 'manual' }, 8000);
+        return { ok: true, detail: 'جهاز المحل يرد (' + r.status + ')' };
+      } catch (e) {
+        // اللوحة لا تصل مباشرة؟ نعتمد على آخر لقطة نجحت فيها n8n بقراءة Manager
+        const s = await q(`SELECT max(taken_at) AS at FROM biz_manager_snapshots`).catch(() => []);
+        const at = s[0]?.at;
+        if (at && Date.now() - new Date(at) < 3 * 3600e3)
+          return { ok: true, detail: 'n8n قرأ منه آخر لقطة ' + new Date(at).toLocaleTimeString('ar-SA', { timeZone: 'Asia/Riyadh', hour: '2-digit', minute: '2-digit' }) + ' (اللوحة نفسها لا تصله: ' + errMsg(e) + ')' };
+        return { ok: false, detail: errMsg(e) + (at ? ' · آخر لقطة ناجحة من n8n ' + new Date(at).toISOString().slice(0, 16).replace('T', ' ') : '') };
+      }
+    }),
   ]);
   liveCache = { at: Date.now(), data: { n8n, ollama, waha, manager } };
   return liveCache.data;
