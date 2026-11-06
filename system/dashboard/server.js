@@ -367,6 +367,7 @@ async function initDb() {
   await q(`CREATE TABLE IF NOT EXISTS dash_proposals (id BIGSERIAL PRIMARY KEY, action TEXT NOT NULL, args JSONB NOT NULL DEFAULT '{}', title TEXT NOT NULL, reason TEXT, status TEXT NOT NULL DEFAULT 'pending',
             result TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), decided_at TIMESTAMPTZ, expires_at TIMESTAMPTZ NOT NULL DEFAULT now() + interval '4 hours')`);
   await q(`CREATE TABLE IF NOT EXISTS dash_gbp_checklist (key TEXT PRIMARY KEY, title TEXT NOT NULL, done BOOLEAN NOT NULL DEFAULT false, pos INT NOT NULL DEFAULT 0, updated_at TIMESTAMPTZ NOT NULL DEFAULT now())`);
+  await q(`INSERT INTO biz_guardrails (key, value) VALUES ('po_min_per_order', '250') ON CONFLICT (key) DO NOTHING`);
   for (const [i, [k, t, d]] of GBP_DEFAULT.entries())
     await q(`INSERT INTO dash_gbp_checklist (key, title, done, pos) VALUES ($1, $2, $3, $4) ON CONFLICT (key) DO NOTHING`, [k, t, d, i]);
 }

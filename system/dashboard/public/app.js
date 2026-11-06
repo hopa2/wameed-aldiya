@@ -495,7 +495,7 @@ VIEWS.log = async (el) => {
 
 // ---------- الإعدادات: حواجز البوابة ----------
 const GUARD = {
-  po_max_per_order: ['سقف أمر الشراء الواحد', 'ر.س'], po_max_per_day: ['سقف المشتريات اليومي', 'ر.س'],
+  po_max_per_order: ['سقف أمر الشراء الواحد', 'ر.س'], po_min_per_order: ['الحد الأدنى لأمر الشراء', 'ر.س'], po_max_per_day: ['سقف المشتريات اليومي', 'ر.س'],
   approval_ttl_hours: ['مهلة طلب الموافقة', 'ساعة'],
 };
 VIEWS.settings = async (el) => {
