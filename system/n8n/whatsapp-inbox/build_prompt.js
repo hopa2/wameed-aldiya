@@ -71,6 +71,7 @@ for (const L of lines) {
     for (const q of L.q) { const ex = [q, ...(SYN[q] || [])]; if (c.t.some((t) => ex.some((e) => tokMatch(t, e)))) s += 2; }
     if (headEx.some((e) => tokMatch(c.t[0], e))) s += 3;
     if (['برميل', 'سطل'].includes(L.unit) && BIG.test(norm(c.i.itemName))) s += 2;
+    if (/عازل|عصا|صنفر/.test(norm(c.i.itemName)) && !L.q.some((q) => /عازل|عصا|صنفر/.test(q))) s -= 3;
     scored.push({ c, s });
   }
   scored.sort((a, b) => b.s - a.s || a.c.t.length - b.c.t.length);
@@ -88,10 +89,13 @@ else if (/ويش سويت|وش سويت|وش صار|ايش صار|وين وصل|
 else if (/مكسور|كسر|خربان|خربت|مرتجع|ارجاع|استرجاع|ترجيع|ناقص|غلط/.test(all)) intent = 'complaint';
 const INTENT = { discount: 'طلب خصم أو أقل سعر', followup: 'سؤال عن طلب سابق', complaint: 'شكوى أو إرجاع' };
 
+// أسطر كلام عادي بلا كمية ولا وحدة ولا مطابقة ليست طلب أصناف، فلا تُعرض على النموذج ولا المالك.
+let shown = lines.filter((L) => !(L.status === 'none' && L.qty === null && !L.unit));
+if (intent) shown = shown.filter((L) => L.status !== 'none');
 // ---------- تسعيرة الكود (لا يراها النموذج) ----------
 const unitOf = (i) => String(i.unitName || '').trim();
 const codeQuote = [], notes = [];
-for (const L of lines) {
+for (const L of shown) {
   if (L.status === 'match') {
     const i = L.cands[0], pr = val(i.salePrice);
     if (pr > 0) codeQuote.push({ item: i.itemName, unit: unitOf(i) || L.unit || '-', qty: L.qty, unit_price: pr });
@@ -99,7 +103,7 @@ for (const L of lines) {
   } else if (L.status === 'options') notes.push('يحتاج تحديد: «' + L.raw + '» ← ' + L.cands.map((i) => i.itemName).join(' / '));
   else notes.push('غير موجود في النظام: «' + L.raw + '»');
 }
-const report = lines.length ? lines.map((L, n) => (n + 1) + ') «' + L.raw + '»' + (L.qty ? ' — الكمية ' + L.qty + (L.unit ? ' ' + L.unit : '') : '') + NL + '   ' +
+const report = shown.length ? shown.map((L, n) => (n + 1) + ') «' + L.raw + '»' + (L.qty ? ' — الكمية ' + L.qty + (L.unit ? ' ' + L.unit : '') : '') + NL + '   ' +
   (L.status === 'match' ? 'مطابقة واحدة: ' + L.cands[0].itemName : L.status === 'options' ? 'عدة خيارات: ' + L.cands.map((i) => i.itemName).join(' | ') : 'غير موجود في النظام')).join(NL)
   : 'لا توجد أصناف واضحة في الرسالة.';
 
