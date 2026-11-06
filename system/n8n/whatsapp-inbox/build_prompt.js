@@ -1,4 +1,4 @@
-// BIZ - WhatsApp Inbox / Build Prompt — نسخة 2026-11-06 (بحث أصناف ذكي بالكود).
+// BIZ - WhatsApp Inbox / Build Prompt — نسخة 2026-11-06ب (بحث أصناف ذكي بالكود + ربط الإجابة بالسؤال السابق).
 // النموذج يكتب نص الرد فقط. مطابقة الأصناف والتسعيرة يحسبها الكود، ولا تصل الأسعار للنموذج أبداً.
 const NL = String.fromCharCode(10);
 const D = $('Decide').first().json;
@@ -13,6 +13,7 @@ const norm = (s) => String(s || '').toLowerCase()
   .replace(/[٠-٩]/g, (d) => String(AR_DIG.indexOf(d)))
   .replace(/(\d)([^\d\s.\/])/g, '$1 $2').replace(/([^\d\s.\/])(\d)/g, '$1 $2');
 const stem = (w) => {
+  if (w.length > 5 && w.startsWith('وال')) w = w.slice(1);
   if (w.length > 4 && w.startsWith('ال')) w = w.slice(2);
   if (w.length > 4 && w.endsWith('ات')) w = w.slice(0, -2);
   if (w.length > 3 && w.endsWith('ه')) w = w.slice(0, -1);
@@ -45,25 +46,28 @@ const tokMatch = (t, q) => isNum(q) ? t === q : (t === q || (q.length >= 3 && t.
 
 const catalog = items.filter((i) => i.itemName).map((i) => ({ i, t: toks(i.itemName) }));
 
-// ---------- تقسيم طلب العميل إلى أسطر ----------
-const rawLines = String(D.pending || '').split(/\n|،|,|؛|\s+و\s+(?=[0-9٠-٩])/).map((s) => s.trim()).filter(Boolean);
-const lines = [];
-for (const raw of rawLines) {
-  let t = toks(raw);
-  while (t.length && FILL.has(t[0])) t = t.slice(1);
-  let qty = null, unit = '';
-  if (t.length && isNum(t[0]) && t.length > 1) { qty = Number(t[0].replace('/', '.')); t = t.slice(1); }
-  if (t.length && UNITS.has(t[0])) { unit = t[0]; t = t.slice(1); }
-  t = t.filter((w) => !FILL.has(w) && !UNITS.has(w));
-  if (!t.length) continue;
-  const prev = lines[lines.length - 1];
-  if (prev && qty === null && t.length <= 2 && !unit && prev.q.length <= 2) { prev.q.push(...t); prev.raw += ' ' + raw; continue; }
-  lines.push({ raw, qty, unit, q: t });
-}
+// ---------- تقسيم نص إلى أسطر طلب ----------
+const splitRaw = (text) => String(text || '').split(/\n|،|,|؛|\s+و\s+(?=[0-9٠-٩])/).map((s) => s.trim()).filter(Boolean);
+const parseLines = (text) => {
+  const out = [];
+  for (const raw of splitRaw(text)) {
+    let t = toks(raw);
+    while (t.length && FILL.has(t[0])) t = t.slice(1);
+    let qty = null, unit = '';
+    if (t.length && isNum(t[0]) && t.length > 1) { qty = Number(t[0].replace('/', '.')); t = t.slice(1); }
+    if (t.length && UNITS.has(t[0])) { unit = t[0]; t = t.slice(1); }
+    t = t.filter((w) => !FILL.has(w) && !UNITS.has(w));
+    if (!t.length) continue;
+    const prev = out[out.length - 1];
+    if (prev && qty === null && t.length <= 2 && !unit && prev.q.length <= 2) { prev.q.push(...t); prev.raw += ' ' + raw; continue; }
+    out.push({ raw, qty, unit, q: t });
+  }
+  return out;
+};
 
-// ---------- مطابقة كل سطر ----------
+// ---------- مطابقة سطر مع النظام ----------
 const BIG = /(^|\s)(1[5-9]|2[0-5])(\.\d+)?\s*(كيلو|كجم|كغ|كلغ|ك)(\s|$)/;
-for (const L of lines) {
+const matchLine = (L) => {
   const head = L.q[0], headEx = [head, ...(SYN[head] || [])];
   const scored = [];
   for (const c of catalog) {
@@ -80,7 +84,72 @@ for (const L of lines) {
   L.cands = scored.filter((x) => x.s >= best - 1).slice(0, 3).map((x) => x.c.i);
   L.status = !scored.length ? 'none' : (scored.length === 1 || scored[0].s - scored[1].s >= 2) ? 'match' : 'options';
   if (L.status === 'match') L.cands = [scored[0].c.i];
+  return L;
+};
+
+// ---------- ربط الرد بأسئلة التحديد السابقة ----------
+// لا توجد ذاكرة محفوظة: الكود يعيد تشغيل آخر رسائل العميل بالترتيب، فيعرف ما سأل عنه سابقاً
+// (الأصناف «عدة خيارات» مع كمياتها)، ثم يطبق إجابة العميل عليها بدل البحث عنها من الصفر.
+const ORD = [/^(ال)?اول|^1$/, /^(ال)?ثاني|^2$/, /^(ال)?ثالث|^3$/];
+const candToks = (i) => toks(i.itemName);
+const hitLine = (w, L) => L.q.some((q) => tokMatch(q, w) || tokMatch(w, q)) || L.cands.some((i) => candToks(i).some((t) => tokMatch(t, w)));
+const step = (pending, text) => {
+  const touched = new Set(), resolved = [], fresh = [];
+  for (const seg of splitRaw(text)) {
+    const words = toks(seg).filter((w) => !FILL.has(w));
+    if (!words.length) continue;
+    // اختيار بالترتيب: «الأول» «الثاني» عند وجود سؤال واحد فقط.
+    const ordIdx = ORD.findIndex((re) => re.test(words[0]));
+    if (ordIdx >= 0 && words.length <= 2 && pending.length === 1 && pending[0].cands[ordIdx]) {
+      const L = pending[0]; touched.add(L);
+      resolved.push({ ...L, raw: L.raw + ' ← ' + seg, status: 'match', cands: [L.cands[ordIdx]] });
+      continue;
+    }
+    const byLine = new Map();
+    for (const w of words) for (const L of pending) if (hitLine(w, L)) { if (!byLine.has(L)) byLine.set(L, []); byLine.get(L).push(w); }
+    if (!byLine.size) { fresh.push(seg); continue; }
+    for (const [L, ws] of byLine) {
+      touched.add(L);
+      const extra = ws.filter((w) => !L.q.some((q) => tokMatch(q, w) || tokMatch(w, q)));
+      const sc = L.cands.map((i) => ({ i, s: extra.filter((w) => candToks(i).some((t) => tokMatch(t, w))).length }));
+      const top = Math.max(0, ...sc.map((x) => x.s));
+      const keep = top > 0 ? sc.filter((x) => x.s === top).map((x) => x.i) : [];
+      let R;
+      if (keep.length === 1) R = { ...L, status: 'match', cands: keep };
+      else if (keep.length > 1) R = { ...L, status: 'options', cands: keep };
+      else R = matchLine({ ...L, q: [...L.q, ...extra.filter((w) => !UNITS.has(w))] });
+      R.raw = L.raw + ' ← ' + seg;
+      // رقم في أول الإجابة كمية، ما لم يكن جزءاً من اسم الصنف (مثل 989).
+      const n0 = toks(seg)[0];
+      if (R.qty === null && isNum(n0) && !R.cands.some((i) => candToks(i).includes(n0))) R.qty = Number(n0);
+      resolved.push(R);
+    }
+  }
+  const fresh_lines = parseLines(fresh.join('\n')).map(matchLine);
+  const untouched = pending.filter((L) => !touched.has(L));
+  // طلب أصناف جديد يلغي الأسئلة القديمة التي لم يرد عليها.
+  const carry = fresh_lines.length ? [] : untouched;
+  const lines = [...resolved, ...fresh_lines, ...carry];
+  return { lines, pending: lines.filter((L) => L.status === 'options') };
+};
+
+// إعادة تشغيل آخر 4 دفعات من رسائل العميل قبل الرسائل الجديدة.
+const blocks = [];
+{
+  let cur = null, who = '';
+  for (const ln of String(D.convo || '').split(NL)) {
+    if (ln.startsWith('العميل:')) { who = 'c'; if (!cur) { cur = []; blocks.push(cur); } cur.push(ln.slice(7).trim()); }
+    else if (ln.startsWith('المحل:')) { who = 's'; cur = null; }
+    else if (who === 'c' && cur) cur.push(ln);
+  }
 }
+const pendNorm = norm(D.pending).replace(/\s+/g, ' ').trim();
+if (blocks.length && pendNorm && pendNorm.includes(norm(blocks[blocks.length - 1].join(' ')).replace(/\s+/g, ' ').trim())) blocks.pop();
+let pend = [];
+for (const b of blocks.slice(-4)) pend = step(pend, b.join('\n')).pending;
+const cur = step(pend, D.pending);
+const lines = cur.lines;
+const linked = pend.length > 0 && cur.lines.some((L) => L.raw.includes(' ← '));
 
 // ---------- تصنيف الرسالة (يُفرض في Parse) ----------
 const all = norm(D.pending);
@@ -157,5 +226,5 @@ const user = [
   'خطة الرد (التزم بها وصغها بأسلوبك):',
   plan.length ? plan.map((p) => '- ' + p).join(NL) : '- اتبع القواعد حسب تصنيف الرسالة.'
 ].join(NL);
-return [{ json: { itemsFound: codeQuote.length, managerOk: items.length > 0, intent, forceHuman, codeQuote: codeQuote.slice(0, 20), lineNote: notes.join(' | ').slice(0, 900),
+return [{ json: { itemsFound: codeQuote.length, managerOk: items.length > 0, intent, forceHuman, codeQuote: codeQuote.slice(0, 20), lineNote: notes.join(' | ').slice(0, 900), linked,
   body: { model: 'qwen3:8b', temperature: 0.5, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] } } }];
