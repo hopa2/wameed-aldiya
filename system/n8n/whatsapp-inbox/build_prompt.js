@@ -48,7 +48,21 @@ const tokMatch = (t, q) => isNum(q) ? t === q : (t === q || (q.length >= 3 && t.
 const catalog = items.filter((i) => i.itemName).map((i) => ({ i, t: toks(i.itemName) }));
 
 // ---------- تقسيم نص إلى أسطر طلب ----------
-const splitRaw = (text) => String(text || '').split(/\n|،|,|؛|\s+و\s+(?=[0-9٠-٩])/).map((s) => s.trim()).filter(Boolean);
+// أول كلمة في أسماء الأصناف: «وفيش» و«وراس» بداية صنف جديد، أما «وصلة» فاسم صنف.
+const HEADS = new Set(catalog.map((c) => c.t[0]).filter(Boolean));
+const splitAnd = (piece) => {
+  const out = [[]];
+  const ws = piece.split(/\s+/).filter(Boolean);
+  for (let k = 0; k < ws.length; k++) {
+    const w = ws[k], cur = out[out.length - 1];
+    const has = cur.some((x) => !FILL.has(stem(norm(x))));
+    if (w === 'و' && has && ws[k + 1] && HEADS.has(stem(norm(ws[k + 1])))) { out.push([]); continue; }
+    if (has && w.length > 2 && w[0] === 'و' && !HEADS.has(stem(norm(w))) && HEADS.has(stem(norm(w.slice(1))))) { out.push([w.slice(1)]); continue; }
+    cur.push(w);
+  }
+  return out.map((x) => x.join(' ').trim()).filter(Boolean);
+};
+const splitRaw = (text) => String(text || '').split(/\n|،|,|؛|\s+و\s+(?=[0-9٠-٩])/).map((s) => s.trim()).filter(Boolean).flatMap(splitAnd);
 const parseLines = (text) => {
   const out = [];
   for (const raw of splitRaw(text)) {
@@ -190,6 +204,8 @@ if (!intent) {
     if (codeQuote.length) plan.push('قل إن التسعيرة المبدئية للأصناف الواضحة تجهزت، ويراجعها المسؤول وتوصله هنا قريب.');
     else plan.push('لا توجد تسعيرة جاهزة بعد، فلا تقل إن التسعيرة جاهزة.');
     for (const L of opts) plan.push('اسأله عن «' + L.raw.replace(/[?؟]/g, '').trim() + '»: تبي ' + L.cands.map((i) => short(i.itemName)).join(' ولا ') + '؟');
+    const noQty = shown.filter((L) => L.status !== 'none' && L.qty === null && !L.unit);
+    if (noQty.length) plan.push('اسأله كم يحتاج من: ' + noQty.map((L) => short(L.cands.length === 1 ? L.cands[0].itemName : L.raw.split(' ← ')[0])).join('، ') + '.');
     if (missing.length) plan.push('قل إنك بتتأكد له مع المسؤول من: ' + missing.map((L) => L.raw).join('، ') + '.');
     if (!shown.length) plan.push('لم يذكر أصنافاً واضحة: اسأله باختصار وش يحتاج بالضبط وكم الكمية.');
   }
