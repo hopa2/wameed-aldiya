@@ -164,7 +164,7 @@ route('GET', /^\/api\/overview$/, async () => {
                  AND executed_at::date = now()::date) AS po_today,
              (SELECT value::text FROM biz_guardrails WHERE key = 'po_max_per_day') AS po_max_per_day`)),
     soft(qa(`
-      SELECT (SELECT to_json(r) FROM (SELECT run_id, run_type, status, dry_run, started_at, summary FROM ads_runs ORDER BY run_id DESC LIMIT 1) r) AS last_run,
+      SELECT (SELECT to_json(r) FROM (SELECT run_id, run_type, CASE WHEN status = 'running' AND started_at < now() - interval '2 hours' THEN 'crashed' ELSE status END AS status, dry_run, started_at, summary FROM ads_runs ORDER BY run_id DESC LIMIT 1) r) AS last_run,
              (SELECT COALESCE(json_object_agg(status, n), '{}') FROM (SELECT status, count(*) n FROM ads_actions
                  WHERE created_at > now() - interval '7 days' GROUP BY status) t) AS actions7d`)),
     soft(qn(`
@@ -247,7 +247,7 @@ route('GET', /^\/api\/workflows$/, async () => qn(`
 
 route('GET', /^\/api\/ads$/, async () => {
   const [runs, actions, state, plan, guard] = await Promise.all([
-    qa(`SELECT run_id, run_type, status, dry_run, started_at, finished_at, left(summary, 1500) AS summary, left(error, 500) AS error
+    qa(`SELECT run_id, run_type, CASE WHEN status = 'running' AND started_at < now() - interval '2 hours' THEN 'crashed' ELSE status END AS status, dry_run, started_at, finished_at, left(summary, 1500) AS summary, left(error, 500) AS error
         FROM ads_runs ORDER BY run_id DESC LIMIT 30`),
     qa(`SELECT action_id, run_id, created_at, action_type, payload, reason, source, status, reject_reason, undone_at,
                (status = 'executed' AND undone_at IS NULL AND created_at > now() - interval '30 days') AS can_undo
@@ -529,7 +529,8 @@ route('PUT', /^\/api\/gbp\/([\w-]+)$/, async (m, b) => {
 // ---------- الرئيس التنفيذي ----------
 const stripWa = (list) => (list || []).map(({ wa, ...x }) => x);
 const CEO_TOOLS = {
-  async get_sales() { const d = await shop(); if (!d.ok) throw new Error(d.error); return { periods: d.periods, goal: d.goal, today_invoices: d.today_invoices.slice(0, 30), cash: d.cash, data_age: d.stale ? 'قديمة: ' + d.stale_error : 'حديثة' }; },
+  async get_sales() { const d = await shop(); if (!d.ok) throw new Error(d.error); const periods = Object.fromEntries(Object.entries(d.periods).map(([k, { profit, ...p }]) => [k, p]));
+    return { periods, goal: d.goal, today_invoices: d.today_invoices.slice(0, 30), cash: d.cash, data_age: d.stale ? 'قديمة: ' + d.stale_error : 'حديثة' }; },
   async get_debtors({ name }) {
     const d = await shop(); if (!d.ok) throw new Error(d.error);
     const r = d.receivables, list = stripWa(r.list);
@@ -552,16 +553,16 @@ const CEO_TOOLS = {
   get_inventory_alerts: async () => { const a = await inventoryAlerts(); return { summary: a.summary, low: a.low.slice(0, 15), top: a.top.slice(0, 10), problems: a.problems.slice(0, 10), stale: a.stale.slice(0, 10) }; },
   async get_system_status() {
     const [paused, l, wf] = await Promise.all([pausedState(), live(), qn(`
-      SELECT w.name, w.active, s.errors FROM workflow_entity w
-      LEFT JOIN LATERAL (SELECT count(*)::int AS errors FROM execution_entity x WHERE x."workflowId" = w.id AND x."startedAt" > now() - interval '24 hours' AND x.status IN ('error', 'crashed')) s ON true
+      SELECT w.name, w.active, s.errors, s.last_at FROM workflow_entity w
+      LEFT JOIN LATERAL (SELECT count(*)::int AS errors, max(x."startedAt") AS last_at FROM execution_entity x WHERE x."workflowId" = w.id AND x."startedAt" > now() - interval '24 hours' AND x.status IN ('error', 'crashed')) s ON true
       WHERE NOT COALESCE(w."isArchived", false) AND w.name ~ '^(BIZ|SYS|ADS|GBP)' ORDER BY w.name`)]);
     return { paused, devices: l, active: wf.filter(w => w.active).length, inactive: wf.filter(w => !w.active).map(w => w.name),
-             errors_24h: wf.filter(w => w.errors > 0).map(w => ({ name: w.name, errors: w.errors, note: /Assistant|ADS-50/.test(w.name) ? 'غالبًا انقطاع عابر في فحص تيليجرام' : undefined })) };
+             errors_24h: wf.filter(w => w.errors > 0).map(w => ({ name: w.name, errors: w.errors, last_error: w.last_at, note: /Assistant|ADS-50/.test(w.name) ? 'غالبًا انقطاع عابر في فحص تيليجرام' : undefined })) };
   },
   get_approvals: async () => q(`SELECT id, agent, action_type, left(summary, 400) AS summary, amount, expires_at FROM biz_approvals WHERE status = 'pending' AND now() <= expires_at ORDER BY id`),
   async get_ads_status() {
     const [runs, actions, plan, guard] = await Promise.all([
-      qa(`SELECT run_id, run_type, status, dry_run, started_at, left(summary, 900) AS summary, left(error, 200) AS error FROM ads_runs ORDER BY run_id DESC LIMIT 3`),
+      qa(`SELECT run_id, run_type, CASE WHEN status = 'running' AND started_at < now() - interval '2 hours' THEN 'crashed' ELSE status END AS status, dry_run, started_at, left(summary, 900) AS summary, left(error, 200) AS error FROM ads_runs ORDER BY run_id DESC LIMIT 3`),
       qa(`SELECT action_id, action_type, status, left(reason, 200) AS reason, created_at FROM ads_actions ORDER BY action_id DESC LIMIT 8`),
       qa(`SELECT value->>'plan_id' AS plan_id, value->>'status' AS status FROM ads_state WHERE key = 'bootstrap_plan'`),
       qa(`SELECT value FROM ads_state WHERE key = 'guard_paused'`),

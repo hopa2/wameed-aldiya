@@ -19,7 +19,7 @@ const STATUS = {
   pending: ['warn', 'بانتظارك'], approved: ['info', 'اعتُمد'], rejected: ['', 'مرفوض'], expired: ['', 'انتهت المهلة'],
   blocked: ['bad', 'حجبه السقف'], executed: ['ok', 'نُفذ'], failed: ['bad', 'فشل التنفيذ'], undone: ['', 'تراجعت عنه'],
   // n8n executions
-  success: ['ok', 'نجح'], error: ['bad', 'فشل'], crashed: ['bad', 'تعطل'], running: ['info', 'يعمل'], waiting: ['info', 'ينتظر'],
+  success: ['ok', 'نجح'], error: ['bad', 'فشل'], crashed: ['bad', 'انقطع'], running: ['info', 'يعمل'], waiting: ['info', 'ينتظر'],
   canceled: ['', 'أُلغي'], new: ['info', 'بدأ'],
   // ads
   ok: ['ok', 'نجح'], paused: ['info', 'موقوف'], dry_run: ['info', 'تجربة: لم يُنفذ'],
@@ -320,7 +320,7 @@ VIEWS.shop = async (el) => {
         ${d.receivables.list.slice(0, 15).map(c => `<tr><td>${esc(c.name)}</td><td class="num">${sar(c.amount)}</td><td class="num">${c.days === null ? '—' : num(c.days) + ' يوم'}</td><td>${waLink(c)}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">لا ذمم</td></tr>'}</table></div>
         <p class="muted" style="font-size:13px;margin:8px 0 0">الرابط يفتح المحادثة فقط، والرسالة ترسلها بنفسك.</p></div>
     </section>
-    <div class="card stack"><div class="row"><h2 style="margin:0">المخزون</h2><span class="muted">${d.inventory ? `${num(d.inventory.count)} صنف · القيمة ${sar(d.inventory.value)} · ${num(d.inventory.negative)} كمية سالبة · ${num(d.inventory.no_price)} بلا سعر` : 'تعذّرت القراءة'}</span></div>
+    <div class="card stack"><div class="row"><h2 style="margin:0">المخزون</h2><span class="muted">${d.inventory ? `${num(d.inventory.count)} صنف · القيمة ${sar(d.inventory.value)} · ${num(d.inventory.negative)} صنف بكمية سالبة في النظام · ${num(d.inventory.no_price)} بلا سعر` : 'تعذّرت القراءة'}</span></div>
       <div class="row" style="flex-wrap:nowrap"><input type="text" id="itemQ" placeholder="ابحث عن صنف"><button class="btn" id="itemGo">بحث</button></div><div id="itemRes"></div>
       <button class="btn" id="invLoad">حساب النواقص والأكثر مبيعًا (دقيقة تقريبًا)</button><div id="invRes"></div></div>`;
   $('#shopFresh').onclick = async (e) => { e.target.disabled = true; await api('shop?fresh=1').catch(() => {}); render(); };
