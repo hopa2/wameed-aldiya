@@ -292,7 +292,7 @@
     400
    ],
    "parameters": {
-    "jsCode": "return [{ json: { run_type: 'owner_request', owner_request: String($input.first().json.request || 'مراجعة بطلب المالك من اللوحة').slice(0, 500) } }];"
+    "jsCode": "// من اللوحة: فحص ومراقبة فقط، بلا تغييرات على الحملة أو صفحة الهبوط.\nreturn [{ json: { run_type: 'daily_check' } }];"
    }
   },
   {

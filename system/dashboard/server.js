@@ -379,7 +379,7 @@ async function control(body, ms = 60e3) {
   if (!r.ok) throw new Error(r.status === 404 ? 'ورك فلو SYS - Dashboard Control غير مفعّل' : 'n8n رد ' + r.status);
   return r.json || {};
 }
-const AGENTS = { reorder: 'وكيل المشتريات', pricing: 'وكيل التسعير', ads_review: 'مراجعة وكيل الإعلانات' };
+const AGENTS = { reorder: 'وكيل المشتريات', pricing: 'وكيل التسعير', ads_review: 'فحص وكيل الإعلانات' };
 const PROTECTED = /^SYS - Dashboard/;
 async function findWorkflow(key) {
   const rows = await qn(`SELECT id, name, active FROM workflow_entity WHERE NOT COALESCE("isArchived", false) AND (id = $1 OR name = $1)`, [String(key)]);
@@ -393,7 +393,7 @@ const ACTIONS = {
     if (agent === 'reorder') { const s = await sold(); await control({ agent, sold: s.sold }); return 'بدأ وكيل المشتريات. أي طلب شراء يصل إلى الموافقات وتيليجرام.'; }
     if (agent === 'pricing') { await control({ agent }); return 'بدأ وكيل التسعير. أي تعديل يصل إلى الموافقات وتيليجرام.'; }
     await control({ agent, request });
-    return 'بدأت مراجعة الإعلانات، وقد تأخذ حتى 30 دقيقة. النتيجة في تبويب الإعلانات وتيليجرام.';
+    return 'بدأ فحص الإعلانات للمراقبة فقط، ولن يغيّر شيئًا. النتيجة في تبويب الإعلانات خلال دقائق.';
   },
   async set_workflow({ workflow, active }) {
     if (typeof active !== 'boolean') throw new Error('حدد تفعيل أو إيقاف');

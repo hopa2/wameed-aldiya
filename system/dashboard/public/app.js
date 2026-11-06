@@ -252,7 +252,7 @@ VIEWS.ads = async (el) => {
   el.innerHTML = `
     <div class="card row"><div><h2 style="margin:0">وكيل إعلانات جوجل</h2>
       <div class="muted" style="font-size:14px">كل أوامر البوت متاحة هنا. التنفيذ على الحساب يبقى ضمن قواعد الوكيل وفترة التجربة.</div></div>
-      <div class="btn-row"><button class="btn primary" id="adsReview">مراجعة الآن</button>
+      <div class="btn-row"><button class="btn primary" id="adsReview">فحص الآن</button>
       <a class="btn" href="#ceo" data-ask="راجع حالة إعلانات جوجل واقترح أهم 3 تحسينات، واذكر ما يحتاج قراري.">اسأل الرئيس عن التحسين</a>
       ${o.paused.ads ? '<button class="btn ok" data-pause="0" data-system="ads">▶️ استئناف</button>' : '<button class="btn bad" data-pause="1" data-system="ads">⛔ إيقاف الوكيل</button>'}</div></div>
     ${g && g.month ? `<div class="banner bad row">🛡️ الحارس أوقف الحملة: ${esc(g.reason || '')} <button class="btn small ok" id="adsResume">إعادة تشغيل الحملة</button></div>` : ''}
@@ -276,7 +276,7 @@ VIEWS.ads = async (el) => {
       ${d.state.map(s => `<tr><td class="ltr" style="text-align:start">${esc(s.key)}</td><td class="ltr" style="text-align:start">${esc(s.value)}</td><td class="num muted">${ago(s.updated_at)}</td></tr>`).join('')}
     </table></div></div>`;
   const act = async (b, msg, path, body = {}) => { if (!confirm(msg)) return; b.disabled = true; try { toast((await api(path, { method: 'POST', body })).message); } catch (e) { toast(e.message); } render(); };
-  $('#adsReview').onclick = (e) => act(e.target, 'تشغيل مراجعة الإعلانات الآن؟ قد تشغل كرت الشاشة حتى 30 دقيقة.', 'agents/ads_review/run');
+  $('#adsReview').onclick = (e) => act(e.target, 'تشغيل فحص الإعلانات الآن؟ للمراقبة فقط، ولن يغيّر شيئًا.', 'agents/ads_review/run');
   const res = $('#adsResume'); if (res) res.onclick = (e) => act(e.target, 'إعادة تشغيل الحملة التي أوقفها الحارس؟ سيعود الصرف.', 'ads/resume');
   el.querySelectorAll('[data-plan]').forEach(b => b.onclick = () => act(b, `اعتماد الخطة ${b.dataset.plan}؟ ستُنفذ على حساب الإعلانات خلال 30 دقيقة.`, `ads/plan/${b.dataset.plan}/approve`));
   el.querySelectorAll('[data-undo]').forEach(b => b.onclick = () => act(b, `التراجع عن الإجراء #${b.dataset.undo}؟`, `ads/undo/${b.dataset.undo}`));
