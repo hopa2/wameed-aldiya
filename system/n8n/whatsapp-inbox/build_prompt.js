@@ -46,10 +46,11 @@ const tokMatch = (t, q) => isNum(q) ? t === q : (t === q || (q.length >= 3 && t.
 const catalog = items.filter((i) => i.itemName).map((i) => ({ i, t: toks(i.itemName) }));
 
 // ---------- تقسيم طلب العميل إلى أسطر ----------
-const rawLines = String(D.pending || '').split(/\n|،|,|؛/).map((s) => s.trim()).filter(Boolean);
+const rawLines = String(D.pending || '').split(/\n|،|,|؛|\s+و\s+(?=[0-9٠-٩])/).map((s) => s.trim()).filter(Boolean);
 const lines = [];
 for (const raw of rawLines) {
   let t = toks(raw);
+  while (t.length && FILL.has(t[0])) t = t.slice(1);
   let qty = null, unit = '';
   if (t.length && isNum(t[0]) && t.length > 1) { qty = Number(t[0].replace('/', '.')); t = t.slice(1); }
   if (t.length && UNITS.has(t[0])) { unit = t[0]; t = t.slice(1); }
@@ -103,6 +104,23 @@ for (const L of shown) {
   } else if (L.status === 'options') notes.push('يحتاج تحديد: «' + L.raw + '» ← ' + L.cands.map((i) => i.itemName).join(' / '));
   else notes.push('غير موجود في النظام: «' + L.raw + '»');
 }
+// خطة الرد يحسبها الكود، والنموذج يصيغها فقط (نموذج 8b لا يلتزم بالقواعد العامة وحده).
+const short = (n) => String(n).replace(/[A-Za-z][\w\-.()]*/g, '').replace(/\(\s*\)/g, '').replace(/\s+/g, ' ').trim();
+const opts = shown.filter((L) => L.status === 'options'), missing = shown.filter((L) => L.status === 'none');
+const plan = [];
+let forceHuman = false;
+if (!intent) {
+  if (opts.length > 3) {
+    forceHuman = true;
+    plan.push('القائمة طويلة وفيها أصناف تحتاج تحديد: قل إن قائمته وصلت، وإن المسؤول بيراجعها معه ويرسل له التسعيرة قريب. لا تسأل عن كل صنف.');
+  } else {
+    if (codeQuote.length) plan.push('قل إن التسعيرة المبدئية للأصناف الواضحة تجهزت، ويراجعها المسؤول وتوصله هنا قريب.');
+    else plan.push('لا توجد تسعيرة جاهزة بعد، فلا تقل إن التسعيرة جاهزة.');
+    for (const L of opts) plan.push('اسأله عن «' + L.raw.replace(/[?؟]/g, '').trim() + '»: تبي ' + L.cands.map((i) => short(i.itemName)).join(' ولا ') + '؟');
+    if (missing.length) plan.push('قل إنك بتتأكد له مع المسؤول من: ' + missing.map((L) => L.raw).join('، ') + '.');
+    if (!shown.length) plan.push('لم يذكر أصنافاً واضحة: اسأله باختصار وش يحتاج بالضبط وكم الكمية.');
+  }
+}
 const report = shown.length ? shown.map((L, n) => (n + 1) + ') «' + L.raw + '»' + (L.qty ? ' — الكمية ' + L.qty + (L.unit ? ' ' + L.unit : '') : '') + NL + '   ' +
   (L.status === 'match' ? 'مطابقة واحدة: ' + L.cands[0].itemName : L.status === 'options' ? 'عدة خيارات: ' + L.cands.map((i) => i.itemName).join(' | ') : 'غير موجود في النظام')).join(NL)
   : 'لا توجد أصناف واضحة في الرسالة.';
@@ -134,7 +152,10 @@ const user = [
   hide(D.pending),
   '',
   'نتيجة البحث في نظام المحل (حسبها النظام، بلا أسعار):',
-  report
+  report,
+  '',
+  'خطة الرد (التزم بها وصغها بأسلوبك):',
+  plan.length ? plan.map((p) => '- ' + p).join(NL) : '- اتبع القواعد حسب تصنيف الرسالة.'
 ].join(NL);
-return [{ json: { itemsFound: codeQuote.length, managerOk: items.length > 0, intent, codeQuote: codeQuote.slice(0, 20), lineNote: notes.join(' | ').slice(0, 900),
+return [{ json: { itemsFound: codeQuote.length, managerOk: items.length > 0, intent, forceHuman, codeQuote: codeQuote.slice(0, 20), lineNote: notes.join(' | ').slice(0, 900),
   body: { model: 'qwen3:8b', temperature: 0.5, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] } } }];
