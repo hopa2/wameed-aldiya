@@ -43,6 +43,7 @@ const lev1 = (a, b) => {
   return e + (a.length - i) + (b.length - j) <= 1;
 };
 const isNum = (w) => /^\d+([.\/]\d+)?$/.test(w);
+const strong = (t, q) => isNum(q) ? t === q : (t === q || (q.length >= 3 && t.startsWith(q)));
 const tokMatch = (t, q) => isNum(q) ? t === q : (t === q || (q.length >= 3 && t.startsWith(q)) || (q.length >= 5 && lev1(t, q)));
 
 const catalog = items.filter((i) => i.itemName).map((i) => ({ i, t: toks(i.itemName) }));
@@ -88,8 +89,9 @@ const matchLine = (L) => {
   for (const c of catalog) {
     if (!c.t.some((t) => headEx.some((e) => tokMatch(t, e)))) continue;
     let s = 0;
-    for (const q of L.q) { const ex = [q, ...(SYN[q] || [])]; if (c.t.some((t) => ex.some((e) => tokMatch(t, e)))) s += 2; }
-    if (headEx.some((e) => tokMatch(c.t[0], e))) s += 3;
+    // التطابق التقريبي (حرف مختلف) يأخذ نقطة واحدة فقط، فلا يكفي وحده لاختيار صنف دون سؤال العميل.
+    for (const q of L.q) { const ex = [q, ...(SYN[q] || [])]; if (c.t.some((t) => ex.some((e) => strong(t, e)))) s += 2; else if (c.t.some((t) => ex.some((e) => tokMatch(t, e)))) s += 1; }
+    if (headEx.some((e) => strong(c.t[0], e))) s += 3; else if (headEx.some((e) => tokMatch(c.t[0], e))) s += 1;
     if (['برميل', 'سطل'].includes(L.unit) && BIG.test(norm(c.i.itemName))) s += 2;
     if (/عازل|عصا|صنفر/.test(norm(c.i.itemName)) && !L.q.some((q) => /عازل|عصا|صنفر/.test(q))) s -= 3;
     scored.push({ c, s });
@@ -120,20 +122,30 @@ const step = (pending, text) => {
       resolved.push({ ...L, raw: L.raw + ' ← ' + seg, status: 'match', cands: [L.cands[ordIdx]] });
       continue;
     }
-    // سطر فيه كمية أو وحدة وصنف كامل (مثل «10 اكياس غراء بلاط») طلب جديد وليس إجابة.
+    // رقم وحده إجابة عن سؤال الكمية، إذا كان هناك صنف واحد فقط ينتظر كميته.
+    const waitQty = pending.filter((L) => L.status === 'match' && L.qty === null);
+    if (words.length === 1 && isNum(words[0]) && waitQty.length === 1) {
+      const L = waitQty[0]; touched.add(L);
+      resolved.push({ ...L, raw: L.raw + ' ← ' + seg, qty: Number(words[0]) });
+      continue;
+    }
+    // سطر فيه كمية أو وحدة وصنف كامل (مثل «10 اكياس غراء بلاط») طلب جديد وليس إجابة،
+    // إلا إذا كانت كل كلماته تخص صنفاً سألناه عنه (مثل «2 شطرطون كهرباء»).
     const pl = parseLines(seg);
-    if (pl.length && (pl[0].qty !== null || pl[0].unit) && pl[0].q.length >= 2) { fresh.push(seg); continue; }
+    const ownsAll = pl.length === 1 && pending.some((L) => pl[0].q.every((w) => hitLine(w, L)));
+    if (pl.length && (pl[0].qty !== null || pl[0].unit) && pl[0].q.length >= 2 && !ownsAll) { fresh.push(seg); continue; }
     const byLine = new Map();
     for (const w of words) for (const L of pending) if (hitLine(w, L)) { if (!byLine.has(L)) byLine.set(L, []); byLine.get(L).push(w); }
     if (!byLine.size) { fresh.push(seg); continue; }
     for (const [L, ws] of byLine) {
       touched.add(L);
-      const extra = ws.filter((w) => !L.q.some((q) => tokMatch(q, w) || tokMatch(w, q)));
+      const extra = ws.filter((w) => !isNum(w) && !L.q.some((q) => tokMatch(q, w) || tokMatch(w, q)));
       const sc = L.cands.map((i) => ({ i, s: extra.filter((w) => candToks(i).some((t) => tokMatch(t, w))).length }));
       const top = Math.max(0, ...sc.map((x) => x.s));
       const keep = top > 0 ? sc.filter((x) => x.s === top).map((x) => x.i) : [];
       let R;
-      if (keep.length === 1) R = { ...L, status: 'match', cands: keep };
+      if (L.status === 'match' && !keep.length && !extra.some((w) => !UNITS.has(w))) R = { ...L };
+      else if (keep.length === 1) R = { ...L, status: 'match', cands: keep };
       else if (keep.length > 1) R = { ...L, status: 'options', cands: keep };
       else R = matchLine({ ...L, q: [...L.q, ...extra.filter((w) => !UNITS.has(w))] });
       R.raw = L.raw + ' ← ' + seg;
@@ -144,11 +156,10 @@ const step = (pending, text) => {
     }
   }
   const fresh_lines = parseLines(fresh.join('\n')).map(matchLine);
-  const untouched = pending.filter((L) => !touched.has(L));
-  // طلب أصناف جديد يلغي الأسئلة القديمة التي لم يرد عليها.
-  const carry = fresh_lines.length ? [] : untouched;
-  const lines = [...resolved, ...fresh_lines, ...carry];
-  return { lines, pending: lines.filter((L) => L.status === 'options') };
+  // الطلب يبقى مفتوحاً (بكل أصنافه) حتى يتحدد نوع وكمية كل صنف، ثم تخرج تسعيرة واحدة كاملة.
+  const lines = [...resolved, ...fresh_lines, ...pending.filter((L) => !touched.has(L))];
+  const ready = lines.every((L) => L.status === 'none' || (L.status === 'match' && L.qty !== null));
+  return { lines, ready, pending: ready ? [] : lines.filter((L) => L.status !== 'none') };
 };
 
 // إعادة تشغيل آخر 4 دفعات من رسائل العميل قبل الرسائل الجديدة.
@@ -183,8 +194,10 @@ if (intent) shown = shown.filter((L) => L.status !== 'none');
 // ---------- تسعيرة الكود (لا يراها النموذج) ----------
 const unitOf = (i) => String(i.unitName || '').trim();
 const codeQuote = [], notes = [];
+const ready = cur.ready;
 for (const L of shown) {
-  if (L.status === 'match') {
+  if (L.status === 'match' && !ready) notes.push('بانتظار الكمية أو باقي الأصناف: ' + L.cands[0].itemName);
+  else if (L.status === 'match') {
     const i = L.cands[0], pr = val(i.salePrice);
     if (pr > 0) codeQuote.push({ item: i.itemName, unit: unitOf(i) || L.unit || '-', qty: L.qty, unit_price: pr });
     else notes.push('بلا سعر في النظام: ' + i.itemName);
@@ -202,10 +215,11 @@ if (!intent) {
     plan.push('القائمة طويلة وفيها أصناف تحتاج تحديد: قل إن قائمته وصلت، وإن المسؤول بيراجعها معه ويرسل له التسعيرة قريب. لا تسأل عن كل صنف.');
   } else {
     if (codeQuote.length) plan.push('قل إن التسعيرة المبدئية للأصناف الواضحة تجهزت، ويراجعها المسؤول وتوصله هنا قريب.');
-    else plan.push('لا توجد تسعيرة جاهزة بعد، فلا تقل إن التسعيرة جاهزة.');
-    for (const L of opts) plan.push('اسأله عن «' + L.raw.replace(/[?؟]/g, '').trim() + '»: تبي ' + L.cands.map((i) => short(i.itemName)).join(' ولا ') + '؟');
-    const noQty = shown.filter((L) => L.status !== 'none' && L.qty === null && !L.unit);
-    if (noQty.length) plan.push('اسأله كم يحتاج من: ' + noQty.map((L) => short(L.cands.length === 1 ? L.cands[0].itemName : L.raw.split(' ← ')[0])).join('، ') + '.');
+    else plan.push('التسعيرة لم تتجهز بعد، ولا تتجهز إلا بعد ما يحدد النوع والكمية لكل صنف، فلا تقل إنها جاهزة.');
+    const label = (L) => L.status === 'match' ? short(L.cands[0].itemName) : L.raw.split(' ← ')[0].split(/\s+/).filter((w) => !FILL.has(stem(norm(w)))).join(' ');
+    for (const L of opts) plan.push('اسأله عن «' + label(L).replace(/[?؟]/g, '').trim() + '»: تبي ' + L.cands.map((i) => short(i.itemName)).join(' ولا ') + '؟');
+    const noQty = shown.filter((L) => L.status !== 'none' && L.qty === null);
+    if (noQty.length) plan.push('اسأله كم يحتاج من: ' + noQty.map(label).join('، ') + '.');
     if (missing.length) plan.push('قل إنك بتتأكد له مع المسؤول من: ' + missing.map((L) => L.raw).join('، ') + '.');
     if (!shown.length) plan.push('لم يذكر أصنافاً واضحة: اسأله باختصار وش يحتاج بالضبط وكم الكمية.');
   }
