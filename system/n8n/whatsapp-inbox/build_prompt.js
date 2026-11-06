@@ -105,6 +105,9 @@ const step = (pending, text) => {
       resolved.push({ ...L, raw: L.raw + ' ← ' + seg, status: 'match', cands: [L.cands[ordIdx]] });
       continue;
     }
+    // سطر فيه كمية أو وحدة وصنف كامل (مثل «10 اكياس غراء بلاط») طلب جديد وليس إجابة.
+    const pl = parseLines(seg);
+    if (pl.length && (pl[0].qty !== null || pl[0].unit) && pl[0].q.length >= 2) { fresh.push(seg); continue; }
     const byLine = new Map();
     for (const w of words) for (const L of pending) if (hitLine(w, L)) { if (!byLine.has(L)) byLine.set(L, []); byLine.get(L).push(w); }
     if (!byLine.size) { fresh.push(seg); continue; }
