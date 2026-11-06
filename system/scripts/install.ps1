@@ -42,19 +42,21 @@ Say 'تشغيل اللوحة (أول مرة تُبنى الصورة في دقي�
 docker compose up -d --build
 if ($LASTEXITCODE -ne 0) { Fail 'فشل docker compose up' }
 
-Say 'نشر SYS - Dashboard Approve بأداة النشر الموجودة'
-$src = "$Root\wameed-aldiya\system\n8n\60-dashboard-approve"
-$dst = "$Root\workflows-src\60-dashboard-approve"
+Say 'نشر ورك فلوهات اللوحة بأداة النشر الموجودة'
 if (-not (Test-Path "$Root\scripts\deploy_workflows.py")) { Fail 'لا يوجد C:\wameed\scripts\deploy_workflows.py' }
-New-Item -ItemType Directory -Force -Path $dst | Out-Null
-Copy-Item "$src\*" $dst -Force
+$names = @('60-dashboard-approve', '61-dashboard-data', '62-dashboard-control')
+foreach ($n in $names) {
+  $dst = "$Root\workflows-src\$n"
+  New-Item -ItemType Directory -Force -Path $dst | Out-Null
+  Copy-Item "$Root\wameed-aldiya\system\n8n\$n\*" $dst -Force
+}
 $ok = $false
 for ($i = 0; $i -lt 30; $i++) {   # ننتظر n8n بعد إعادة التشغيل
   try { Invoke-WebRequest -UseBasicParsing http://localhost:5678/healthz -TimeoutSec 3 | Out-Null; $ok = $true; break } catch { Start-Sleep -Seconds 2 }
 }
 if (-not $ok) { Fail 'n8n لم يرد خلال دقيقة: docker compose logs n8n' }
-python -I "$Root\scripts\deploy_workflows.py" 60-dashboard-approve
-if ($LASTEXITCODE -ne 0) { Fail 'فشل نشر SYS - Dashboard Approve (اللوحة تعمل، لكن الموافقة ستبقى من تيليجرام)' }
+python -I "$Root\scripts\deploy_workflows.py" @names
+if ($LASTEXITCODE -ne 0) { Fail 'فشل نشر ورك فلوهات اللوحة' }
 
 Say 'فحص لوحة التحكم'
 Start-Sleep -Seconds 3

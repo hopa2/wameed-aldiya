@@ -20,6 +20,8 @@ services:
     environment:
       DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:?ضع DASHBOARD_PASSWORD في .env}
       WAMEED_DASH_TOKEN: ${WAMEED_DASH_TOKEN}
+      N8N_API_KEY: ${N8N_API_KEY:-}     # لتفعيل وإيقاف الوكلاء من اللوحة فقط
+      CEO_MODEL: ${CEO_MODEL:-qwen3:8b}   # عقل الرئيس التنفيذي المحلي
       PGHOST: postgres
       PGUSER: wameed
       PGPASSWORD: ${PG_PASSWORD}

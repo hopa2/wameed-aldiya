@@ -1,7 +1,7 @@
 {
   "name": "SYS - Dashboard Approve",
   "activate": true,
-  "settings": { "executionOrder": "v1", "timezone": "Asia/Riyadh", "saveDataSuccessExecution": "all", "saveDataErrorExecution": "all" },
+  "settings": { "errorWorkflow": "{{WF:SYS - Error Alert}}", "executionOrder": "v1", "timezone": "Asia/Riyadh", "saveDataSuccessExecution": "all", "saveDataErrorExecution": "all" },
   "nodes": [
     { "id": "d1a7c0de-0001-4a00-9000-000000000001", "name": "From Dashboard", "type": "n8n-nodes-base.webhook", "typeVersion": 2,
       "position": [0, 0], "webhookId": "5b0d6f3e-2a4c-4c51-9d77-3e1d0a5ba001",
