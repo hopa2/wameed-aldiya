@@ -228,7 +228,9 @@ if (!intent) {
     plan.push('القائمة طويلة وفيها أصناف تحتاج تحديد: قل إن قائمته وصلت، وإن المسؤول بيراجعها معه ويرسل له التسعيرة قريب. لا تسأل عن كل صنف.');
   } else {
     if (codeQuote.length) plan.push('قل إن التسعيرة المبدئية للأصناف الواضحة تجهزت، ويراجعها المسؤول وتوصله هنا قريب.');
-    else plan.push('التسعيرة لم تتجهز بعد، ولا تتجهز إلا بعد ما يحدد النوع والكمية لكل صنف، فلا تقل إنها جاهزة.');
+    else if (!ready) plan.push('التسعيرة لم تتجهز بعد، ولا تتجهز إلا بعد ما يحدد النوع والكمية لكل صنف، فلا تقل إنها جاهزة.');
+    const noPrice = ready ? shown.filter((L) => L.status === 'match' && !(val(L.cands[0].salePrice) > 0)) : [];
+    if (noPrice.length) plan.push('قل إن المسؤول بيأكد له سعر: ' + noPrice.map((L) => short(L.cands[0].itemName)).join('، ') + '، ويرد عليه هنا قريب. لا تقل إن التسعيرة جاهزة لهذه الأصناف.');
     const label = (L) => L.status === 'match' ? short(L.cands[0].itemName) : L.raw.split(' ← ')[0].split(/\s+/).filter((w) => !FILL.has(stem(norm(w)))).join(' ');
     for (const L of opts) plan.push('اسأله عن «' + label(L).replace(/[?؟]/g, '').trim() + '»: تبي ' + L.cands.map((i) => short(i.itemName)).join(' ولا ') + '؟');
     const noQty = shown.filter((L) => L.status !== 'none' && L.qty === null);
@@ -273,5 +275,5 @@ const user = [
   'خطة الرد (التزم بها وصغها بأسلوبك):',
   plan.length ? plan.map((p) => '- ' + p).join(NL) : '- اتبع القواعد حسب تصنيف الرسالة.'
 ].join(NL);
-return [{ json: { _dbg: { lines: lines.map((L) => ({ raw: L.raw, st: L.status, qty: L.qty, c: (L.cands || []).map((i) => i.itemName) })), ready: cur.ready }, itemsFound: codeQuote.length, managerOk: items.length > 0, intent, forceHuman, codeQuote: codeQuote.slice(0, 20), lineNote: notes.join(' | ').slice(0, 900), linked,
+return [{ json: { itemsFound: codeQuote.length, managerOk: items.length > 0, intent, forceHuman, codeQuote: codeQuote.slice(0, 20), lineNote: notes.join(' | ').slice(0, 900), linked,
   body: { model: 'qwen3:8b', temperature: 0.5, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] } } }];
