@@ -250,8 +250,9 @@ route('GET', /^\/api\/ads$/, async () => {
     qa(`SELECT run_id, run_type, CASE WHEN status = 'running' AND started_at < now() - interval '2 hours' THEN 'crashed' ELSE status END AS status, dry_run, started_at, finished_at, left(summary, 1500) AS summary, left(error, 500) AS error
         FROM ads_runs ORDER BY run_id DESC LIMIT 30`),
     qa(`SELECT action_id, run_id, created_at, action_type, payload, reason, source, status, reject_reason, undone_at,
-               (status = 'executed' AND undone_at IS NULL AND created_at > now() - interval '30 days') AS can_undo
-        FROM ads_actions ORDER BY action_id DESC LIMIT 60`),
+               (status = 'executed' AND undone_at IS NULL AND created_at > now() - interval '30 days') AS can_undo,
+               (status = 'awaiting_approval' AND created_at > now() - interval '72 hours') AS can_decide
+        FROM ads_actions WHERE source <> 'test' ORDER BY action_id DESC LIMIT 60`),
     qa(`SELECT key, left(value::text, 200) AS value, updated_at FROM ads_state ORDER BY key`),
     qa(`SELECT value FROM ads_state WHERE key = 'bootstrap_plan'`),
     qa(`SELECT value FROM ads_state WHERE key = 'guard_paused'`),
@@ -422,6 +423,10 @@ const ACTIONS = {
     await qa(`UPDATE ads_actions SET status = 'undone', undone_at = now() WHERE action_id = $1`, [Number(a.action_id)]);
     return `تم التراجع عن الإجراء #${action_id}.`;
   },
+  async ads_decide({ action_id, decision }) {
+    const r = await control({ agent: 'ads_decide', action_id: Number(action_id), decision: decision === 'reject' ? 'reject' : 'approve' }, 180e3);
+    return String(r.text || 'تم إرسال القرار إلى وكيل الإعلانات');
+  },
   async ads_resume() {
     const g = (await qa(`SELECT value FROM ads_state WHERE key = 'guard_paused'`))[0]?.value;
     if (!g || !g.month || !(g.campaigns || []).length) throw new Error('الحارس لم يوقف أي حملة');
@@ -445,6 +450,7 @@ function proposalTitle(a) {
     case 'set_workflow': return (a.active ? 'تفعيل ' : 'إيقاف ') + a.workflow;
     case 'ads_approve_plan': return 'اعتماد خطة الإعلانات رقم ' + a.plan_id;
     case 'ads_undo': return 'التراجع عن إجراء الإعلانات #' + a.action_id;
+    case 'ads_decide': return (a.decision === 'reject' ? 'رفض' : 'اعتماد') + ' إجراء الإعلانات #' + a.action_id;
     case 'ads_resume': return 'إعادة تشغيل الحملة التي أوقفها الحارس';
     case 'pause': return (a.paused ? 'إيقاف ' : 'استئناف ') + ({ biz: 'وكلاء المحل', ads: 'وكيل الإعلانات' }[a.system] || 'كل الوكلاء');
     default: return a.action;
@@ -464,6 +470,7 @@ route('POST', /^\/api\/agents\/(\w+)\/run$/, async (m, b) => ({ ok: true, messag
 route('POST', /^\/api\/workflows\/([\w-]+)\/active$/, async (m, b) => ({ ok: true, message: await runAction('set_workflow', { workflow: m[1], active: !!b.active }, 'dashboard') }));
 route('POST', /^\/api\/ads\/plan\/(\d+)\/approve$/, async (m) => ({ ok: true, message: await runAction('ads_approve_plan', { plan_id: Number(m[1]) }, 'dashboard') }));
 route('POST', /^\/api\/ads\/undo\/(\d+)$/, async (m) => ({ ok: true, message: await runAction('ads_undo', { action_id: Number(m[1]) }, 'dashboard') }));
+route('POST', /^\/api\/ads\/actions\/(\d+)\/(approve|reject)$/, async (m) => ({ ok: true, message: await runAction('ads_decide', { action_id: Number(m[1]), decision: m[2] }, 'dashboard') }));
 route('POST', /^\/api\/ads\/resume$/, async () => ({ ok: true, message: await runAction('ads_resume', {}, 'dashboard') }));
 
 route('POST', /^\/api\/proposals\/(\d+)\/(confirm|reject)$/, async (m) => {
@@ -564,7 +571,7 @@ const CEO_TOOLS = {
   async get_ads_status() {
     const [runs, actions, plan, guard] = await Promise.all([
       qa(`SELECT run_id, run_type, CASE WHEN status = 'running' AND started_at < now() - interval '2 hours' THEN 'crashed' ELSE status END AS status, dry_run, started_at, left(summary, 900) AS summary, left(error, 200) AS error FROM ads_runs ORDER BY run_id DESC LIMIT 3`),
-      qa(`SELECT action_id, action_type, status, left(reason, 200) AS reason, created_at FROM ads_actions ORDER BY action_id DESC LIMIT 8`),
+      qa(`SELECT action_id, action_type, payload, status, left(reason, 200) AS reason, created_at FROM ads_actions WHERE source <> 'test' ORDER BY action_id DESC LIMIT 8`),
       qa(`SELECT value->>'plan_id' AS plan_id, value->>'status' AS status FROM ads_state WHERE key = 'bootstrap_plan'`),
       qa(`SELECT value FROM ads_state WHERE key = 'guard_paused'`),
     ]);

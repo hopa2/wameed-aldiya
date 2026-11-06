@@ -23,6 +23,7 @@ const STATUS = {
   canceled: ['', 'أُلغي'], new: ['info', 'بدأ'],
   // ads
   ok: ['ok', 'نجح'], paused: ['info', 'موقوف'], dry_run: ['info', 'تجربة: لم يُنفذ'],
+  awaiting_approval: ['warn', 'بانتظارك'], approved_running: ['info', 'قيد التنفيذ'],
 };
 const label = (s) => (STATUS[s] || [, s])[1];
 const pill = (s) => { const [c, t] = STATUS[s] || ['', s || '—']; return `<span class="pill ${c}"><span class="dot"></span>${esc(t)}</span>`; };
@@ -245,6 +246,12 @@ VIEWS.agents = async (el) => {
 };
 
 // ---------- الإعلانات ----------
+const adsLabel = (t, p) => ({
+  add_negative_keyword: `كلمة سلبية «${p.text}»`, pause_keyword: `إيقاف الكلمة «${p.text || p.criterion_id}»`,
+  adjust_keyword_cpc: `سعر نقرة «${p.text || p.criterion_id}» من ${p.current_cpc} إلى ${p.new_cpc} ر.س`, pause_ad: `إيقاف إعلان ${p.ad_id}`,
+  pause_ad_group: `إيقاف مجموعة ${p.ad_group_id}`, enable_item: `إعادة تشغيل ${p.level}`, add_keyword: `كلمة جديدة «${p.text}»`,
+  create_ad: `إعلان جديد (${(p.headlines || []).length} عنوان)`, change_ad_schedule: 'تعديل جدولة الإعلانات', update_landing_page: `تحديث صفحة الهبوط`,
+}[t] || t);
 VIEWS.ads = async (el) => {
   const [d, o] = await Promise.all([api('ads'), api('overview')]);
   header(o);
@@ -259,9 +266,14 @@ VIEWS.ads = async (el) => {
     ${plan && plan.plan_id ? `<div class="card stack"><div class="row"><h2 style="margin:0">خطة حملة البحث #${esc(plan.plan_id)}</h2>${pill(plan.status)}</div>
       ${plan.status === 'awaiting_approval' ? `<div class="btn-row"><button class="btn ok" data-plan="${esc(plan.plan_id)}">✅ اعتماد الخطة</button></div>` : ''}
       <details><summary class="muted">تفاصيل الخطة</summary><pre>${esc(JSON.stringify(plan, null, 2).slice(0, 12000))}</pre></details></div>` : ''}
+    ${d.actions.filter(a => a.can_decide).length ? `<div class="card stack"><h2 style="margin:0">بانتظار موافقتك (${d.actions.filter(a => a.can_decide).length})</h2>
+      ${d.actions.filter(a => a.can_decide).map(a => `<div class="card approval stack" style="box-shadow:none"><div class="row"><strong>#${a.action_id} · ${esc(adsLabel(a.action_type, a.payload || {}))}</strong><span class="muted" style="font-size:13px">${ago(a.created_at)}</span></div>
+        <div class="muted" style="font-size:14px">${esc(String(a.reason || '').slice(0, 300))}</div>
+        <div class="actions"><button class="btn ok" data-adsd="${a.action_id}" data-dec="approve">✅ موافقة وتنفيذ</button><button class="btn bad" data-adsd="${a.action_id}" data-dec="reject">❌ رفض</button></div></div>`).join('')}
+      <p class="muted" style="font-size:13px;margin:0">لا ينفذ وكيل الإعلانات أي إجراء إلا بعد موافقتك. الطلب ينتهي بعد 72 ساعة.</p></div>` : ''}
     <div class="card"><h2>آخر الإجراءات</h2><div class="table-wrap"><table>
       <tr><th>#</th><th>الإجراء</th><th>الحالة</th><th class="hide-sm">السبب</th><th>متى</th><th></th></tr>
-      ${d.actions.map(a => `<tr><td class="num">${a.action_id}</td><td class="ltr" style="text-align:start">${esc(a.action_type)}<div class="muted" style="font-size:12px">${esc(a.source)}</div></td>
+      ${d.actions.map(a => `<tr><td class="num">${a.action_id}</td><td>${esc(adsLabel(a.action_type, a.payload || {}))}<div class="muted" style="font-size:12px">${esc(a.source)}</div></td>
         <td>${pill(a.status)}${a.undone_at ? ' ' + pill('undone') : ''}</td>
         <td class="hide-sm muted" style="font-size:13px">${esc(String(a.reason || a.reject_reason || '').slice(0, 200))}</td><td class="num">${when(a.created_at)}</td>
         <td>${a.can_undo ? `<button class="btn small" data-undo="${a.action_id}">تراجع</button>` : ''}</td></tr>`).join('')
@@ -280,6 +292,7 @@ VIEWS.ads = async (el) => {
   const res = $('#adsResume'); if (res) res.onclick = (e) => act(e.target, 'إعادة تشغيل الحملة التي أوقفها الحارس؟ سيعود الصرف.', 'ads/resume');
   el.querySelectorAll('[data-plan]').forEach(b => b.onclick = () => act(b, `اعتماد الخطة ${b.dataset.plan}؟ ستُنفذ على حساب الإعلانات خلال 30 دقيقة.`, `ads/plan/${b.dataset.plan}/approve`));
   el.querySelectorAll('[data-undo]').forEach(b => b.onclick = () => act(b, `التراجع عن الإجراء #${b.dataset.undo}؟`, `ads/undo/${b.dataset.undo}`));
+  el.querySelectorAll('[data-adsd]').forEach(b => b.onclick = () => act(b, b.dataset.dec === 'approve' ? `تنفيذ الإجراء #${b.dataset.adsd} على حساب الإعلانات الآن؟` : `رفض الإجراء #${b.dataset.adsd}؟`, `ads/actions/${b.dataset.adsd}/${b.dataset.dec}`));
 };
 
 // ---------- المحل ----------

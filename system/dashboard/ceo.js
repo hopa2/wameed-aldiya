@@ -21,6 +21,7 @@ const SYSTEM = `أنت «الرئيس التنفيذي» الآلي لمؤسسة
 - reorder: وكيل المشتريات، يجهز طلب شراء يصل للموافقة.
 - pricing: وكيل التسعير، يجهز تعديلات أسعار تصل للموافقة.
 - ads_review: وكيل إعلانات جوجل، يفحص الحملة للمراقبة فقط ولا يغيّر شيئًا.
+قرار المالك: كل إجراء يقترحه وكيل الإعلانات ينتظر موافقته (حالته awaiting_approval). لتنفيذ واحد منها جهّز بطاقة ads_decide برقمه. الحارس وحده يوقف الحملة تلقائيًا عند تجاوز السقف.
 وكيل التسويق والملف التجاري: اكتب المسودات بنفسك في الرد، بلهجة جازانية بسيطة للعملاء، بلا أسعار غير موثقة وبلا ادعاءات مطلقة مثل «أرخص سعر». النشر قرار المالك.
 لا يوجد بعد وكيل مستقل للموظفين أو الموردين. قل ذلك إذا طُلبا.
 نشر الملف التجاري عبر Google API ينتظر موافقة Google، فلا تعد بنشر آلي.
@@ -40,13 +41,14 @@ const TOOLS = [
   fn('get_whatsapp_status', 'حالة جلسة واتساب وعروض الأسعار المعلقة.'),
   fn('get_gbp_status', 'قائمة تحسين ملف جوجل التجاري وما بقي منها.'),
   fn('propose_action', 'يجهز بطاقة إجراء للمالك ليوافق أو يرفض. لا ينفذ شيئًا.', {
-    action: { type: 'string', enum: ['run_agent', 'set_workflow', 'ads_approve_plan', 'ads_undo', 'ads_resume', 'pause'], description: 'نوع الإجراء' },
+    action: { type: 'string', enum: ['run_agent', 'set_workflow', 'ads_approve_plan', 'ads_decide', 'ads_undo', 'ads_resume', 'pause'], description: 'نوع الإجراء' },
     agent: { type: 'string', enum: ['reorder', 'pricing', 'ads_review'], description: 'مع run_agent' },
     request: { type: 'string', description: 'مع ads_review: ماذا يراجع' },
     workflow: { type: 'string', description: 'مع set_workflow: اسم الوكيل كما ظهر في get_system_status' },
     active: { type: 'boolean', description: 'مع set_workflow: تفعيل أو إيقاف' },
     plan_id: { type: 'number', description: 'مع ads_approve_plan' },
-    action_id: { type: 'number', description: 'مع ads_undo' },
+    action_id: { type: 'number', description: 'مع ads_undo أو ads_decide' },
+    decision: { type: 'string', enum: ['approve', 'reject'], description: 'مع ads_decide' },
     paused: { type: 'boolean', description: 'مع pause: إيقاف أو استئناف' },
     system: { type: 'string', enum: ['biz', 'ads', 'all'], description: 'مع pause' },
     reason: { type: 'string', description: 'سبب الاقتراح في سطر واحد' },
