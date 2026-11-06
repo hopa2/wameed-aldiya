@@ -151,7 +151,8 @@ const step = (pending, text) => {
     const single = byLine.size === 1;
     for (const [L, ws] of byLine) {
       touched.add(L);
-      const extra = ws.filter((w) => !isNum(w) && !L.q.some((q) => tokMatch(q, w) || tokMatch(w, q)));
+      // الرقم يُعد مواصفة فقط إذا كان جزءاً من اسم أحد الخيارات (مثل 989)، وإلا فهو كمية.
+      const extra = ws.filter((w) => (!isNum(w) || L.cands.some((i) => candToks(i).includes(w))) && !L.q.some((q) => tokMatch(q, w) || tokMatch(w, q)));
       const sc = L.cands.map((i) => ({ i, s: extra.filter((w) => candToks(i).some((t) => tokMatch(t, w))).length }));
       const top = Math.max(0, ...sc.map((x) => x.s));
       const keep = top > 0 ? sc.filter((x) => x.s === top).map((x) => x.i) : [];
@@ -272,5 +273,5 @@ const user = [
   'خطة الرد (التزم بها وصغها بأسلوبك):',
   plan.length ? plan.map((p) => '- ' + p).join(NL) : '- اتبع القواعد حسب تصنيف الرسالة.'
 ].join(NL);
-return [{ json: { itemsFound: codeQuote.length, managerOk: items.length > 0, intent, forceHuman, codeQuote: codeQuote.slice(0, 20), lineNote: notes.join(' | ').slice(0, 900), linked,
+return [{ json: { _dbg: { lines: lines.map((L) => ({ raw: L.raw, st: L.status, qty: L.qty, c: (L.cands || []).map((i) => i.itemName) })), ready: cur.ready }, itemsFound: codeQuote.length, managerOk: items.length > 0, intent, forceHuman, codeQuote: codeQuote.slice(0, 20), lineNote: notes.join(' | ').slice(0, 900), linked,
   body: { model: 'qwen3:8b', temperature: 0.5, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] } } }];
