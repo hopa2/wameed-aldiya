@@ -134,9 +134,21 @@ const step = (pending, text) => {
     const pl = parseLines(seg);
     const ownsAll = pl.length === 1 && pending.some((L) => pl[0].q.every((w) => hitLine(w, L)));
     if (pl.length && (pl[0].qty !== null || pl[0].unit) && pl[0].q.length >= 2 && !ownsAll) { fresh.push(seg); continue; }
+    // كل كلمة تذهب للصنف الذي تخصه. الكلمة المشتركة (مثل «فيش») تذهب للصنف الذي أخذ أكثر كلمات هذا السطر،
+    // وإن لم يتميز صنف (مثل «صيني» بعد سؤالين) تُطبق على الجميع.
+    const hits = words.map((w) => ({ w, Ls: pending.filter((L) => hitLine(w, L)) }));
+    const uniq = new Map();
+    for (const h of hits) if (h.Ls.length === 1) uniq.set(h.Ls[0], (uniq.get(h.Ls[0]) || 0) + 1);
     const byLine = new Map();
-    for (const w of words) for (const L of pending) if (hitLine(w, L)) { if (!byLine.has(L)) byLine.set(L, []); byLine.get(L).push(w); }
+    const add = (L, w) => { if (!byLine.has(L)) byLine.set(L, []); byLine.get(L).push(w); };
+    for (const h of hits) {
+      if (!h.Ls.length) continue;
+      if (h.Ls.length === 1) { add(h.Ls[0], h.w); continue; }
+      const top = Math.max(...h.Ls.map((L) => uniq.get(L) || 0));
+      (top > 0 ? h.Ls.filter((L) => (uniq.get(L) || 0) === top) : h.Ls).forEach((L) => add(L, h.w));
+    }
     if (!byLine.size) { fresh.push(seg); continue; }
+    const single = byLine.size === 1;
     for (const [L, ws] of byLine) {
       touched.add(L);
       const extra = ws.filter((w) => !isNum(w) && !L.q.some((q) => tokMatch(q, w) || tokMatch(w, q)));
@@ -151,7 +163,7 @@ const step = (pending, text) => {
       R.raw = L.raw + ' ← ' + seg;
       // رقم في أول الإجابة كمية، ما لم يكن جزءاً من اسم الصنف (مثل 989).
       const n0 = toks(seg)[0];
-      if (R.qty === null && isNum(n0) && !R.cands.some((i) => candToks(i).includes(n0))) R.qty = Number(n0);
+      if (single && R.qty === null && isNum(n0) && !R.cands.some((i) => candToks(i).includes(n0))) R.qty = Number(n0);
       resolved.push(R);
     }
   }
