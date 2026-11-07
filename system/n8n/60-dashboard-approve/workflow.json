@@ -1,0 +1,22 @@
+{
+  "name": "SYS - Dashboard Approve",
+  "activate": true,
+  "settings": { "errorWorkflow": "{{WF:SYS - Error Alert}}", "executionOrder": "v1", "timezone": "Asia/Riyadh", "saveDataSuccessExecution": "all", "saveDataErrorExecution": "all" },
+  "nodes": [
+    { "id": "d1a7c0de-0001-4a00-9000-000000000001", "name": "From Dashboard", "type": "n8n-nodes-base.webhook", "typeVersion": 2,
+      "position": [0, 0], "webhookId": "5b0d6f3e-2a4c-4c51-9d77-3e1d0a5ba001",
+      "parameters": { "httpMethod": "POST", "path": "wameed-dash-approve", "responseMode": "lastNode", "responseData": "firstEntryJson", "options": {} } },
+    { "id": "d1a7c0de-0002-4a00-9000-000000000002", "name": "Check", "type": "n8n-nodes-base.code", "typeVersion": 2,
+      "position": [220, 0], "parameters": { "jsCode": "@file:check.js" } },
+    { "id": "d1a7c0de-0003-4a00-9000-000000000003", "name": "Approval Gate", "type": "n8n-nodes-base.executeWorkflow", "typeVersion": 1.2,
+      "position": [440, 0],
+      "parameters": { "workflowId": { "__rl": true, "mode": "id", "value": "{{WF:SYS - Approval Gate}}" }, "options": { "waitForSubWorkflow": true } } },
+    { "id": "d1a7c0de-0004-4a00-9000-000000000004", "name": "Done", "type": "n8n-nodes-base.code", "typeVersion": 2,
+      "position": [660, 0], "parameters": { "jsCode": "return [{ json: { ok: true } }];" } }
+  ],
+  "connections": {
+    "From Dashboard": { "main": [[{ "node": "Check", "type": "main", "index": 0 }]] },
+    "Check": { "main": [[{ "node": "Approval Gate", "type": "main", "index": 0 }]] },
+    "Approval Gate": { "main": [[{ "node": "Done", "type": "main", "index": 0 }]] }
+  }
+}
