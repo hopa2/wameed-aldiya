@@ -2,7 +2,7 @@
 // يقرأ بأدوات ثابتة، وكل إجراء يصبح بطاقة (dash_proposals) لا تُنفذ إلا بضغطة المالك على الخادم.
 'use strict';
 
-const SYSTEM = `أنت «الرئيس التنفيذي» الآلي لمؤسسة وميض الضياء لمواد البناء في الحشيبرية، صبيا، جازان (سباكة، كهرباء، دهانات، مواد بناء، عدد يدوية). المحل يبيع المواد ولا يوفر عمالًا.
+const DEFAULT_SYSTEM = `أنت «الرئيس التنفيذي» الآلي لمؤسسة وميض الضياء لمواد البناء في الحشيبرية، صبيا، جازان (سباكة، كهرباء، دهانات، مواد بناء، عدد يدوية). المحل يبيع المواد ولا يوفر عمالًا.
 تتحدث مع المالك عبدالوهاب داخل لوحة التحكم. الشريك أبو عمر يستلم التقارير ويوافق على عروض أسعار واتساب فقط، وبقية القرارات للمالك وحده.
 قرارات الدستور (2026-11-06): كل إجراء لوكيل الإعلانات بموافقة المالك. بيانات العملاء تُعالج محليًا، وصوت المالك وحده يمر بـ Groq. النماذج: qwen3:8b للرئيس والبوت وواتساب، وqwen3:14b للإعلانات. تفهم طلبه، وتستخدم الأدوات، وتوجّه الوكلاء، وتلخص النتيجة ليقرر.
 
@@ -28,6 +28,27 @@ const SYSTEM = `أنت «الرئيس التنفيذي» الآلي لمؤسسة
 نشر الملف التجاري عبر Google API ينتظر موافقة Google، فلا تعد بنشر آلي.
 
 الأسلوب: فصحى مختصرة ومباشرة، جمل قصيرة، 8 أسطر بالكثير ما لم يطلب تفصيلًا، الأرقام 123 بالريال (ر.س)، بلا Markdown معقد. إذا كان الطلب غامضًا فاسأل سؤالًا واحدًا. أبرز سطر هو القرار أو الخطوة التالية.`;
+
+// التعليمات الخاصة تُقرأ من الدستور الموحّد على اللابتوب (C:\wameed\CONSTITUTION.md)، ولا تُرفع إلى GitHub.
+// يُؤخذ أول كتلة كود تحت عنوان «## 1.»، ويُضاف بعدها جزء الأدوات من التعليمات العامة.
+// إذا لم يوجد الملف أو لم توجد الكتلة، تعمل التعليمات العامة أعلاه كما هي.
+const fs = require('fs');
+const PROMPT_FILE = process.env.CEO_PROMPT_FILE || '/run/wameed/CONSTITUTION.md';
+const TOOLS_PART = DEFAULT_SYSTEM.slice(DEFAULT_SYSTEM.indexOf('الوكلاء الذين توجههم عبر propose_action:'));
+
+function loadSystem() {
+  try {
+    const st = fs.statSync(PROMPT_FILE);
+    if (!st.isFile()) return { text: DEFAULT_SYSTEM, source: 'default' };
+    const md = fs.readFileSync(PROMPT_FILE, 'utf8');
+    const m = md.match(/^## 1\.[^\n]*\n[\s\S]*?^```[^\n]*\n([\s\S]*?)^```/m);
+    if (!m || m[1].trim().length < 200) return { text: DEFAULT_SYSTEM, source: 'default' };
+    return { text: m[1].trim() + '\n\n' + TOOLS_PART, source: 'constitution' };
+  } catch { return { text: DEFAULT_SYSTEM, source: 'default' }; }
+}
+const loaded = loadSystem();
+const SYSTEM = loaded.text;
+console.log('[ceo] system prompt source:', loaded.source);
 
 const fn = (name, description, properties = {}, required = []) => ({ type: 'function', function: { name, description, parameters: { type: 'object', properties, required } } });
 const TOOLS = [

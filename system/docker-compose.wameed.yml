@@ -33,6 +33,9 @@ services:
       OLLAMA_URL: http://host.docker.internal:11434
       MANAGER_URL: http://100.95.125.96:55668
       TZ: Asia/Riyadh
+    volumes:
+      # تعليمات الرئيس التنفيذي الخاصة: الدستور الموحّد على اللابتوب، للقراءة فقط، ولا يُرفع إلى GitHub
+      - ./CONSTITUTION.md:/run/wameed/CONSTITUTION.md:ro
     ports:
       - "127.0.0.1:8080:8080"     # من الجوال: عبر tailscale serve فقط (انظر الدليل)
     extra_hosts:
