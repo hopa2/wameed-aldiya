@@ -1,0 +1,492 @@
+{
+ "name": "SYS - Dashboard Data",
+ "activate": true,
+ "settings": {
+  "errorWorkflow": "{{WF:SYS - Error Alert}}",
+  "executionOrder": "v1",
+  "timezone": "Asia/Riyadh",
+  "saveDataSuccessExecution": "none",
+  "saveDataErrorExecution": "all"
+ },
+ "nodes": [
+  {
+   "id": "b32544d6-9120-4fe8-ac21-2638f611d0b4",
+   "name": "Summary Request",
+   "type": "n8n-nodes-base.webhook",
+   "typeVersion": 2,
+   "position": [
+    0,
+    0
+   ],
+   "webhookId": "6314f754-35b3-491d-955e-8f4dbec6e22a",
+   "parameters": {
+    "httpMethod": "POST",
+    "path": "wameed-dash-data",
+    "responseMode": "lastNode",
+    "responseData": "firstEntryJson",
+    "options": {}
+   }
+  },
+  {
+   "id": "bee720cb-0072-4573-9ba4-74d4fb8552d3",
+   "name": "Check Summary",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    200,
+    0
+   ],
+   "parameters": {
+    "jsCode": "@file:check.js"
+   }
+  },
+  {
+   "id": "1d50d802-f7b2-4d27-b01b-018ec11cb147",
+   "name": "Get Invoices",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    400,
+    0
+   ],
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 3000,
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "{{CRED:BIZ - Manager API}}",
+     "name": "BIZ - Manager API"
+    }
+   },
+   "parameters": {
+    "method": "GET",
+    "url": "http://100.95.125.96:55668/api2/sales-invoices?pageSize=8000&sortBy=IssueDate&sortByDesc=true",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "options": {
+     "response": {
+      "response": {
+       "neverError": true,
+       "responseFormat": "text"
+      }
+     },
+     "timeout": 90000
+    }
+   }
+  },
+  {
+   "id": "fce48073-dfdb-42dd-a437-0436b3d8207b",
+   "name": "Get Customers",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    600,
+    0
+   ],
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 3000,
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "{{CRED:BIZ - Manager API}}",
+     "name": "BIZ - Manager API"
+    }
+   },
+   "parameters": {
+    "method": "GET",
+    "url": "http://100.95.125.96:55668/api2/customers?pageSize=2000",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "options": {
+     "response": {
+      "response": {
+       "neverError": true,
+       "responseFormat": "text"
+      }
+     },
+     "timeout": 90000
+    }
+   }
+  },
+  {
+   "id": "ba95ac54-641f-4b74-8a43-8e3c7b83970c",
+   "name": "Get Items",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    800,
+    0
+   ],
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 3000,
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "{{CRED:BIZ - Manager API}}",
+     "name": "BIZ - Manager API"
+    }
+   },
+   "parameters": {
+    "method": "GET",
+    "url": "http://100.95.125.96:55668/api2/inventory-items?pageSize=5000",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "options": {
+     "response": {
+      "response": {
+       "neverError": true,
+       "responseFormat": "text"
+      }
+     },
+     "timeout": 90000
+    }
+   }
+  },
+  {
+   "id": "e85b0233-761b-44f9-b3a0-15a2f5890e6a",
+   "name": "Get Receipts",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    1000,
+    0
+   ],
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 3000,
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "{{CRED:BIZ - Manager API}}",
+     "name": "BIZ - Manager API"
+    }
+   },
+   "parameters": {
+    "method": "GET",
+    "url": "http://100.95.125.96:55668/api2/receipts?pageSize=5000",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "options": {
+     "response": {
+      "response": {
+       "neverError": true,
+       "responseFormat": "text"
+      }
+     },
+     "timeout": 90000
+    }
+   }
+  },
+  {
+   "id": "2a8e9bcd-ac9a-40bc-850f-67093f3e76b0",
+   "name": "Get Payments",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    1200,
+    0
+   ],
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 3000,
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "{{CRED:BIZ - Manager API}}",
+     "name": "BIZ - Manager API"
+    }
+   },
+   "parameters": {
+    "method": "GET",
+    "url": "http://100.95.125.96:55668/api2/payments?pageSize=5000",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "options": {
+     "response": {
+      "response": {
+       "neverError": true,
+       "responseFormat": "text"
+      }
+     },
+     "timeout": 90000
+    }
+   }
+  },
+  {
+   "id": "82ade8da-f679-47c9-909d-8e3c03cb2e79",
+   "name": "Build Summary",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1400,
+    0
+   ],
+   "parameters": {
+    "jsCode": "@file:build_summary.js"
+   }
+  },
+  {
+   "id": "987255a7-1a92-4628-a39f-65762fdea8c3",
+   "name": "Sold Request",
+   "type": "n8n-nodes-base.webhook",
+   "typeVersion": 2,
+   "position": [
+    0,
+    300
+   ],
+   "webhookId": "79bc1cbe-6354-46ff-997c-db8541ce4645",
+   "parameters": {
+    "httpMethod": "POST",
+    "path": "wameed-dash-sold",
+    "responseMode": "lastNode",
+    "responseData": "firstEntryJson",
+    "options": {}
+   }
+  },
+  {
+   "id": "cd74c1cc-4ab3-44cd-8f0d-1feb5c4095fc",
+   "name": "Check Sold",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    200,
+    300
+   ],
+   "parameters": {
+    "jsCode": "@file:check.js"
+   }
+  },
+  {
+   "id": "47ae218f-84bb-464d-add8-8bc25a6b8af8",
+   "name": "Recent Invoices",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    400,
+    300
+   ],
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 3000,
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "{{CRED:BIZ - Manager API}}",
+     "name": "BIZ - Manager API"
+    }
+   },
+   "parameters": {
+    "method": "GET",
+    "url": "http://100.95.125.96:55668/api2/sales-invoices?pageSize=1500&sortBy=IssueDate&sortByDesc=true",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "options": {
+     "response": {
+      "response": {
+       "neverError": true,
+       "responseFormat": "text"
+      }
+     },
+     "timeout": 90000
+    }
+   }
+  },
+  {
+   "id": "cb7b2bbf-c290-4297-a602-8982c0fdfdb2",
+   "name": "Prepare Sold",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    600,
+    300
+   ],
+   "parameters": {
+    "jsCode": "@file:prepare_sold.js"
+   }
+  },
+  {
+   "id": "56120d1b-09fe-43bf-bd3d-5a8aa2c9fb3b",
+   "name": "Get Lines",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    800,
+    300
+   ],
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 3000,
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "{{CRED:BIZ - Manager API}}",
+     "name": "BIZ - Manager API"
+    }
+   },
+   "parameters": {
+    "method": "GET",
+    "url": "=http://100.95.125.96:55668/api2/sales-invoice-form/{{ $json.key }}",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "options": {
+     "response": {
+      "response": {
+       "neverError": true,
+       "responseFormat": "text"
+      }
+     },
+     "timeout": 90000,
+     "batching": {
+      "batch": {
+       "batchSize": 5,
+       "batchInterval": 1000
+      }
+     }
+    }
+   }
+  },
+  {
+   "id": "bd9744ee-a15d-4ec4-81ac-f3822a94e426",
+   "name": "Build Sold",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1000,
+    300
+   ],
+   "parameters": {
+    "jsCode": "@file:build_sold.js"
+   }
+  }
+ ],
+ "connections": {
+  "Summary Request": {
+   "main": [
+    [
+     {
+      "node": "Check Summary",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Check Summary": {
+   "main": [
+    [
+     {
+      "node": "Get Invoices",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Get Invoices": {
+   "main": [
+    [
+     {
+      "node": "Get Customers",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Get Customers": {
+   "main": [
+    [
+     {
+      "node": "Get Items",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Get Items": {
+   "main": [
+    [
+     {
+      "node": "Get Receipts",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Get Receipts": {
+   "main": [
+    [
+     {
+      "node": "Get Payments",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Get Payments": {
+   "main": [
+    [
+     {
+      "node": "Build Summary",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Sold Request": {
+   "main": [
+    [
+     {
+      "node": "Check Sold",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Check Sold": {
+   "main": [
+    [
+     {
+      "node": "Recent Invoices",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Recent Invoices": {
+   "main": [
+    [
+     {
+      "node": "Prepare Sold",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Prepare Sold": {
+   "main": [
+    [
+     {
+      "node": "Get Lines",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Get Lines": {
+   "main": [
+    [
+     {
+      "node": "Build Sold",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ }
+}

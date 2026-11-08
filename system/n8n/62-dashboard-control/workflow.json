@@ -1,0 +1,660 @@
+{
+ "name": "SYS - Dashboard Control",
+ "activate": true,
+ "settings": {
+  "errorWorkflow": "{{WF:SYS - Error Alert}}",
+  "executionOrder": "v1",
+  "timezone": "Asia/Riyadh",
+  "saveDataSuccessExecution": "none",
+  "saveDataErrorExecution": "all"
+ },
+ "nodes": [
+  {
+   "id": "b1c8de39-07a7-4133-bca7-839780b53b23",
+   "name": "From Dashboard",
+   "type": "n8n-nodes-base.webhook",
+   "typeVersion": 2,
+   "position": [
+    0,
+    0
+   ],
+   "webhookId": "d8996a1f-2b30-425b-9be5-4946c3f39066",
+   "parameters": {
+    "httpMethod": "POST",
+    "path": "wameed-dash-control",
+    "responseMode": "lastNode",
+    "responseData": "firstEntryJson",
+    "options": {}
+   }
+  },
+  {
+   "id": "56938d21-c2dc-48b5-a536-06322b3c627a",
+   "name": "Check",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    200,
+    0
+   ],
+   "parameters": {
+    "jsCode": "@file:check.js"
+   }
+  },
+  {
+   "id": "0b630d07-b0ef-4fac-b063-4f60fcdb252b",
+   "name": "Route",
+   "type": "n8n-nodes-base.switch",
+   "typeVersion": 3.2,
+   "position": [
+    400,
+    0
+   ],
+   "parameters": {
+    "mode": "rules",
+    "rules": {
+     "values": [
+      {
+       "conditions": {
+        "options": {
+         "caseSensitive": true,
+         "leftValue": "",
+         "typeValidation": "strict"
+        },
+        "conditions": [
+         {
+          "leftValue": "={{ $json.agent }}",
+          "rightValue": "reorder",
+          "operator": {
+           "type": "string",
+           "operation": "equals"
+          }
+         }
+        ],
+        "combinator": "and"
+       },
+       "renameOutput": true,
+       "outputKey": "reorder"
+      },
+      {
+       "conditions": {
+        "options": {
+         "caseSensitive": true,
+         "leftValue": "",
+         "typeValidation": "strict"
+        },
+        "conditions": [
+         {
+          "leftValue": "={{ $json.agent }}",
+          "rightValue": "pricing",
+          "operator": {
+           "type": "string",
+           "operation": "equals"
+          }
+         }
+        ],
+        "combinator": "and"
+       },
+       "renameOutput": true,
+       "outputKey": "pricing"
+      },
+      {
+       "conditions": {
+        "options": {
+         "caseSensitive": true,
+         "leftValue": "",
+         "typeValidation": "strict"
+        },
+        "conditions": [
+         {
+          "leftValue": "={{ $json.agent }}",
+          "rightValue": "ads_review",
+          "operator": {
+           "type": "string",
+           "operation": "equals"
+          }
+         }
+        ],
+        "combinator": "and"
+       },
+       "renameOutput": true,
+       "outputKey": "ads_review"
+      },
+      {
+       "conditions": {
+        "options": {
+         "caseSensitive": true,
+         "leftValue": "",
+         "typeValidation": "strict"
+        },
+        "conditions": [
+         {
+          "leftValue": "={{ $json.agent }}",
+          "rightValue": "ads_undo",
+          "operator": {
+           "type": "string",
+           "operation": "equals"
+          }
+         }
+        ],
+        "combinator": "and"
+       },
+       "renameOutput": true,
+       "outputKey": "ads_undo"
+      },
+      {
+       "conditions": {
+        "options": {
+         "caseSensitive": true,
+         "leftValue": "",
+         "typeValidation": "strict"
+        },
+        "conditions": [
+         {
+          "leftValue": "={{ $json.agent }}",
+          "rightValue": "ads_resume",
+          "operator": {
+           "type": "string",
+           "operation": "equals"
+          }
+         }
+        ],
+        "combinator": "and"
+       },
+       "renameOutput": true,
+       "outputKey": "ads_resume"
+      },
+      {
+       "conditions": {
+        "options": {
+         "caseSensitive": true,
+         "leftValue": "",
+         "typeValidation": "strict"
+        },
+        "conditions": [
+         {
+          "leftValue": "={{ $json.agent }}",
+          "rightValue": "quote",
+          "operator": {
+           "type": "string",
+           "operation": "equals"
+          }
+         }
+        ],
+        "combinator": "and"
+       },
+       "renameOutput": true,
+       "outputKey": "quote"
+      }
+     ]
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "b012cb23-c0ce-45dc-8c4d-451fe625d23d",
+   "name": "Reorder Input",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    600,
+    0
+   ],
+   "parameters": {
+    "jsCode": "return [{ json: { sold: $input.first().json.sold } }];"
+   }
+  },
+  {
+   "id": "3ded897a-67c6-4815-aa15-f0d1645433dd",
+   "name": "Reorder",
+   "type": "n8n-nodes-base.executeWorkflow",
+   "typeVersion": 1.2,
+   "position": [
+    800,
+    0
+   ],
+   "parameters": {
+    "workflowId": {
+     "__rl": true,
+     "mode": "id",
+     "value": "{{WF:BIZ - Reorder Suggest}}"
+    },
+    "options": {
+     "waitForSubWorkflow": false
+    }
+   }
+  },
+  {
+   "id": "bc861104-0103-484d-bee3-cda63f1d1854",
+   "name": "Started 1",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1000,
+    0
+   ],
+   "parameters": {
+    "jsCode": "return [{ json: { ok: true, started: true } }];"
+   }
+  },
+  {
+   "id": "54f54030-ec47-47b1-8cff-ce45a1833a5b",
+   "name": "Pricing Input",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    600,
+    200
+   ],
+   "parameters": {
+    "jsCode": "return [{ json: {} }];"
+   }
+  },
+  {
+   "id": "e0c26f4d-28ee-4201-9d3e-b1ff302002de",
+   "name": "Pricing",
+   "type": "n8n-nodes-base.executeWorkflow",
+   "typeVersion": 1.2,
+   "position": [
+    800,
+    200
+   ],
+   "parameters": {
+    "workflowId": {
+     "__rl": true,
+     "mode": "id",
+     "value": "{{WF:BIZ - Pricing Suggest}}"
+    },
+    "options": {
+     "waitForSubWorkflow": false
+    }
+   }
+  },
+  {
+   "id": "ee41c44f-6cef-4769-a379-285015fcc87e",
+   "name": "Started 2",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1000,
+    200
+   ],
+   "parameters": {
+    "jsCode": "return [{ json: { ok: true, started: true } }];"
+   }
+  },
+  {
+   "id": "c072166a-cf6a-43cb-babc-9eb80e6a842b",
+   "name": "Review Input",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    600,
+    400
+   ],
+   "parameters": {
+    "jsCode": "// من اللوحة: فحص ومراقبة فقط، بلا تغييرات على الحملة أو صفحة الهبوط.\nreturn [{ json: { run_type: 'daily_check' } }];"
+   }
+  },
+  {
+   "id": "15aa1d3b-53e9-4378-b7cb-9f78124a8a4c",
+   "name": "Ads Review",
+   "type": "n8n-nodes-base.executeWorkflow",
+   "typeVersion": 1.2,
+   "position": [
+    800,
+    400
+   ],
+   "parameters": {
+    "workflowId": {
+     "__rl": true,
+     "mode": "id",
+     "value": "{{WF:ADS-30 وكيل إعلانات جوجل}}"
+    },
+    "options": {
+     "waitForSubWorkflow": false
+    }
+   }
+  },
+  {
+   "id": "b3b06071-5820-462e-90ff-17541a45e30d",
+   "name": "Started 3",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1000,
+    400
+   ],
+   "parameters": {
+    "jsCode": "return [{ json: { ok: true, started: true } }];"
+   }
+  },
+  {
+   "id": "5ab48611-80bc-4a4f-9b43-59bd26daf003",
+   "name": "Undo Input",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    600,
+    600
+   ],
+   "parameters": {
+    "jsCode": "const u = $input.first().json; return [{ json: { action_id: u.action_id, type: u.type, payload: u.payload, prev_state: u.prev_state, created_resource: u.created_resource, mode: 'undo' } }];"
+   }
+  },
+  {
+   "id": "b5d342fd-585a-44ee-9385-9bcd5119f504",
+   "name": "Undo",
+   "type": "n8n-nodes-base.executeWorkflow",
+   "typeVersion": 1.2,
+   "position": [
+    800,
+    600
+   ],
+   "parameters": {
+    "workflowId": {
+     "__rl": true,
+     "mode": "id",
+     "value": "{{WF:ADS-31 المنفّذ}}"
+    },
+    "options": {
+     "waitForSubWorkflow": true
+    }
+   }
+  },
+  {
+   "id": "3bba2837-9495-4d9f-9d99-deb7544ffe20",
+   "name": "Ads Config",
+   "type": "n8n-nodes-base.executeWorkflow",
+   "typeVersion": 1.2,
+   "position": [
+    600,
+    800
+   ],
+   "parameters": {
+    "workflowId": {
+     "__rl": true,
+     "mode": "id",
+     "value": "{{WF:ADS-00 CONFIG}}"
+    },
+    "options": {
+     "waitForSubWorkflow": true
+    }
+   }
+  },
+  {
+   "id": "bd9d7f23-244c-416c-8574-89f34b25d7e7",
+   "name": "Resume List",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    800,
+    800
+   ],
+   "parameters": {
+    "jsCode": "const cid = $input.first().json.ads_customer_id_digits;\nconst list = $('Check').first().json.campaigns || [];\nreturn list.map(c => ({ json: { op: 'mutate', path: 'campaigns:mutate', tag: String(c.id), live_reason: 'owner_resume', body: { operations: [{ update: { resourceName: `customers/${cid}/campaigns/${c.id}`, status: 'ENABLED' }, updateMask: 'status' }] } } }));"
+   }
+  },
+  {
+   "id": "7c37f031-1f93-49f2-9ece-90a7ee95b3ce",
+   "name": "Resume",
+   "type": "n8n-nodes-base.executeWorkflow",
+   "typeVersion": 1.2,
+   "position": [
+    1000,
+    800
+   ],
+   "parameters": {
+    "workflowId": {
+     "__rl": true,
+     "mode": "id",
+     "value": "{{WF:ADS-01 Google Ads API}}"
+    },
+    "options": {
+     "waitForSubWorkflow": true
+    }
+   }
+  },
+  {
+   "id": "1992cd48-77ef-49b7-86be-106817dc62c1",
+   "name": "Resume Result",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1200,
+    800
+   ],
+   "parameters": {
+    "jsCode": "const rs = $input.all().map(i => i.json);\nreturn [{ json: { ok: rs.every(r => r.ok), live: rs.some(r => r.ok && !r.validate_only), error: rs.filter(r => !r.ok).map(r => r.error).join(' | ').slice(0, 300) } }];"
+   }
+  },
+  {
+   "id": "31700c56-29b2-4604-8d49-4ad25df22465",
+   "name": "Quote Decision",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    800,
+    1000
+   ],
+   "parameters": {
+    "method": "POST",
+    "url": "http://localhost:5678/webhook/wameed-quote-decision-Hq83Lx",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify({ action: $json.action === 'y' ? 'y' : 'n', token: String($json.token), by: '367407052' }) }}",
+    "options": {
+     "response": {
+      "response": {
+       "neverError": true
+      }
+     },
+     "timeout": 20000
+    }
+   }
+  },
+  {
+   "id": "8967d09b-d0ab-4cd8-967f-78898983ab76",
+   "name": "Quote Result",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1000,
+    1000
+   ],
+   "parameters": {
+    "jsCode": "return [{ json: { ok: true } }];"
+   }
+  }
+ ],
+ "connections": {
+  "From Dashboard": {
+   "main": [
+    [
+     {
+      "node": "Check",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Check": {
+   "main": [
+    [
+     {
+      "node": "Route",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Route": {
+   "main": [
+    [
+     {
+      "node": "Reorder Input",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Pricing Input",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Review Input",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Undo Input",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Ads Config",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Quote Decision",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Reorder Input": {
+   "main": [
+    [
+     {
+      "node": "Reorder",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Reorder": {
+   "main": [
+    [
+     {
+      "node": "Started 1",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Pricing Input": {
+   "main": [
+    [
+     {
+      "node": "Pricing",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Pricing": {
+   "main": [
+    [
+     {
+      "node": "Started 2",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Review Input": {
+   "main": [
+    [
+     {
+      "node": "Ads Review",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Ads Review": {
+   "main": [
+    [
+     {
+      "node": "Started 3",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Undo Input": {
+   "main": [
+    [
+     {
+      "node": "Undo",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Ads Config": {
+   "main": [
+    [
+     {
+      "node": "Resume List",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Resume List": {
+   "main": [
+    [
+     {
+      "node": "Resume",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Resume": {
+   "main": [
+    [
+     {
+      "node": "Resume Result",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Quote Decision": {
+   "main": [
+    [
+     {
+      "node": "Quote Result",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ }
+}

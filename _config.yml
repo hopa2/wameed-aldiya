@@ -1,0 +1,4 @@
+# GitHub Pages: انشر صفحة الهبوط فقط، ولا تنشر ملفات المنظومة
+exclude:
+  - system
+  - README.md

@@ -1,0 +1,368 @@
+{
+ "name": "ADS-33 قرار المالك على إجراء",
+ "activate": true,
+ "settings": {
+  "errorWorkflow": "{{WF:SYS - Error Alert}}",
+  "executionOrder": "v1",
+  "timezone": "Asia/Riyadh",
+  "callerPolicy": "workflowsFromSameOwner",
+  "saveDataSuccessExecution": "all",
+  "saveDataErrorExecution": "all"
+ },
+ "nodes": [
+  {
+   "id": "90fc12b8-05f4-41d6-9056-0b4e1ca619d0",
+   "name": "Request",
+   "type": "n8n-nodes-base.executeWorkflowTrigger",
+   "typeVersion": 1.1,
+   "position": [
+    0,
+    0
+   ],
+   "parameters": {
+    "inputSource": "passthrough"
+   }
+  },
+  {
+   "id": "07924555-de98-4a69-a411-6f191e9e2d07",
+   "name": "Claim",
+   "type": "n8n-nodes-base.postgres",
+   "typeVersion": 2.5,
+   "position": [
+    220,
+    0
+   ],
+   "alwaysOutputData": true,
+   "credentials": {
+    "postgres": {
+     "id": "{{CRED:Postgres wameed_ads}}",
+     "name": "Postgres wameed_ads"
+    }
+   },
+   "parameters": {
+    "operation": "executeQuery",
+    "query": "UPDATE ads_actions SET status = CASE WHEN $2 = 'approve' THEN 'approved_running' ELSE 'rejected' END, reject_reason = CASE WHEN $2 = 'approve' THEN reject_reason ELSE 'رفض المالك' END WHERE action_id = $1 AND status = 'awaiting_approval' AND created_at > now() - interval '72 hours' RETURNING action_id, action_type, payload, CASE WHEN status = 'approved_running' THEN 'approve' ELSE 'reject' END AS decision",
+    "options": {
+     "queryReplacement": "={{ [Number($json.action_id), $json.decision === 'approve' ? 'approve' : 'reject'] }}"
+    }
+   }
+  },
+  {
+   "id": "bf9e94bc-a3c6-4b81-95b7-408cf1f2b2d6",
+   "name": "Route",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    440,
+    0
+   ],
+   "parameters": {
+    "jsCode": "@file:route.js"
+   }
+  },
+  {
+   "id": "8c9df2e4-a9e1-4cb0-8963-2d443b5fa0b0",
+   "name": "Kind",
+   "type": "n8n-nodes-base.switch",
+   "typeVersion": 3.2,
+   "position": [
+    660,
+    0
+   ],
+   "parameters": {
+    "mode": "rules",
+    "rules": {
+     "values": [
+      {
+       "conditions": {
+        "options": {
+         "caseSensitive": true,
+         "leftValue": "",
+         "typeValidation": "strict"
+        },
+        "conditions": [
+         {
+          "leftValue": "={{ $json.kind }}",
+          "rightValue": "ads",
+          "operator": {
+           "type": "string",
+           "operation": "equals"
+          }
+         }
+        ],
+        "combinator": "and"
+       },
+       "renameOutput": true,
+       "outputKey": "ads"
+      },
+      {
+       "conditions": {
+        "options": {
+         "caseSensitive": true,
+         "leftValue": "",
+         "typeValidation": "strict"
+        },
+        "conditions": [
+         {
+          "leftValue": "={{ $json.kind }}",
+          "rightValue": "landing",
+          "operator": {
+           "type": "string",
+           "operation": "equals"
+          }
+         }
+        ],
+        "combinator": "and"
+       },
+       "renameOutput": true,
+       "outputKey": "landing"
+      },
+      {
+       "conditions": {
+        "options": {
+         "caseSensitive": true,
+         "leftValue": "",
+         "typeValidation": "strict"
+        },
+        "conditions": [
+         {
+          "leftValue": "={{ $json.kind }}",
+          "rightValue": "info",
+          "operator": {
+           "type": "string",
+           "operation": "equals"
+          }
+         }
+        ],
+        "combinator": "and"
+       },
+       "renameOutput": true,
+       "outputKey": "info"
+      }
+     ]
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "cdcb86d4-3c76-4d3d-ba64-c194f4d02e0d",
+   "name": "Executor",
+   "type": "n8n-nodes-base.executeWorkflow",
+   "typeVersion": 1.2,
+   "position": [
+    880,
+    -160
+   ],
+   "parameters": {
+    "workflowId": {
+     "__rl": true,
+     "mode": "id",
+     "value": "{{WF:ADS-31 المنفّذ}}"
+    },
+    "options": {
+     "waitForSubWorkflow": true
+    }
+   }
+  },
+  {
+   "id": "125341c5-5295-4faf-b5bf-985cfc71c451",
+   "name": "Results",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1100,
+    -160
+   ],
+   "parameters": {
+    "jsCode": "@file:results.js"
+   }
+  },
+  {
+   "id": "533a1182-def9-45de-905d-6e8b24caf961",
+   "name": "Update action",
+   "type": "n8n-nodes-base.postgres",
+   "typeVersion": 2.5,
+   "position": [
+    1320,
+    -160
+   ],
+   "alwaysOutputData": true,
+   "credentials": {
+    "postgres": {
+     "id": "{{CRED:Postgres wameed_ads}}",
+     "name": "Postgres wameed_ads"
+    }
+   },
+   "parameters": {
+    "operation": "executeQuery",
+    "query": "UPDATE ads_actions SET status = $2, prev_state = $3::jsonb, created_resource = $4, api_request = $5::jsonb, api_response = $6::jsonb, reject_reason = coalesce($7, reject_reason) WHERE action_id = $1",
+    "options": {
+     "queryReplacement": "={{ [$json.action_id, $json.status, JSON.stringify($json.prev_state), $json.created_resource, JSON.stringify($json.api_request || null), JSON.stringify($json.api_response || null), $json.error] }}"
+    }
+   }
+  },
+  {
+   "id": "25dd0055-5c63-4df0-8583-8a9c8a55f593",
+   "name": "Reply ads",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1540,
+    -160
+   ],
+   "parameters": {
+    "jsCode": "@file:reply_ads.js"
+   }
+  },
+  {
+   "id": "6e88e2b7-2718-4bf6-ab1c-3e7078d14132",
+   "name": "Landing page",
+   "type": "n8n-nodes-base.executeWorkflow",
+   "typeVersion": 1.2,
+   "position": [
+    880,
+    0
+   ],
+   "parameters": {
+    "workflowId": {
+     "__rl": true,
+     "mode": "id",
+     "value": "{{WF:ADS-32 تحديث صفحة الهبوط}}"
+    },
+    "options": {
+     "waitForSubWorkflow": true
+    }
+   }
+  },
+  {
+   "id": "37e093fc-4a1b-4903-9bb3-2b051b8109a4",
+   "name": "Reply landing",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1100,
+    0
+   ],
+   "parameters": {
+    "jsCode": "return [{ json: { text: `✅ وافقت على تحديث صفحة الهبوط #${$('Route').first().json.action_id}. تصلك النتيجة عند النشر أو الرجوع.` } }];"
+   }
+  },
+  {
+   "id": "794ac6fd-6f7b-4368-8167-f9fe28b795ab",
+   "name": "Reply info",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    880,
+    160
+   ],
+   "parameters": {
+    "jsCode": "return [{ json: { text: $input.first().json.text } }];"
+   }
+  }
+ ],
+ "connections": {
+  "Request": {
+   "main": [
+    [
+     {
+      "node": "Claim",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Claim": {
+   "main": [
+    [
+     {
+      "node": "Route",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Route": {
+   "main": [
+    [
+     {
+      "node": "Kind",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Kind": {
+   "main": [
+    [
+     {
+      "node": "Executor",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Landing page",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Reply info",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Executor": {
+   "main": [
+    [
+     {
+      "node": "Results",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Results": {
+   "main": [
+    [
+     {
+      "node": "Update action",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Update action": {
+   "main": [
+    [
+     {
+      "node": "Reply ads",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Landing page": {
+   "main": [
+    [
+     {
+      "node": "Reply landing",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ }
+}
