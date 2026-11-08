@@ -20,8 +20,9 @@
     Safe to run again at any time: it updates Open WebUI and keeps your data.
 
 .PARAMETER Port
-    Port to open in the browser. Default 8080 (or the port used last time).
-    If it is busy, 3000 is tried.
+    Port to open in the browser. Default 3000 (or the port used last time).
+    8080 is left free for the Wameed business dashboard (system/dashboard).
+    If 3000 is busy, 3100 is tried.
 
 .PARAMETER PullModels
     Download the models listed in -Models into Ollama.
@@ -47,7 +48,7 @@
 #>
 [CmdletBinding()]
 param(
-    [int]$Port = 8080,
+    [int]$Port = 3000,
     [switch]$PullModels,
     [string[]]$Models = @('qwen2.5:7b', 'llama3.1:8b'),
     [switch]$OptimizeOllama,
@@ -308,9 +309,10 @@ Stop-PipOpenWebUI
 if ($useDocker) { Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue }
 
 if (Test-PortBusy $Port) {
-    Warn "Port $Port is already used by another program. Switching to 3000."
-    $Port = 3000
-    if (Test-PortBusy $Port) { Fail "Port 3000 is also busy. Run again with another port, e.g.  Setup-OpenWebUI.cmd -Port 3100" }
+    $old = $Port
+    $Port = if ($old -eq 3100) { 3200 } else { 3100 }
+    Warn "Port $old is already used by another program. Switching to $Port."
+    if (Test-PortBusy $Port) { Fail "Port $Port is also busy. Run again with another port, e.g.  Setup-OpenWebUI.cmd -Port 3300" }
 }
 
 if ($useDocker) {
