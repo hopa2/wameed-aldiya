@@ -1,0 +1,29 @@
+# ============================================================
+# وكيل المتجر الإلكتروني (سلة) فوق docker-compose.yml في C:\wameed
+# يضيف خدمة الصور imgproc (rembg + الشعار، مجانية ومحلية) ومتغيرات سلة لـ n8n.
+# المسارات النسبية تُحسب من C:\wameed (مجلد الملف الأول).
+# التفعيل: store\install-store.ps1
+# ============================================================
+services:
+  n8n:
+    environment:
+      SALLA_CLIENT_ID: ${SALLA_CLIENT_ID:-}
+      SALLA_CLIENT_SECRET: ${SALLA_CLIENT_SECRET:-}
+      SALLA_OAUTH_STATE: ${SALLA_OAUTH_STATE:-}
+      SALLA_REDIRECT_URI: ${SALLA_REDIRECT_URI:-http://localhost:5678/webhook/salla-oauth}
+      STORE_EMPLOYEE_WA: ${STORE_EMPLOYEE_WA:-}
+
+  imgproc:
+    build: ./store/imgproc
+    image: wameed-imgproc:local
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:7000:7000"
+    environment:
+      REMBG_MODEL: isnet-general-use
+      OUT_SIZE: "1200"
+    volumes:
+      - imgdata:/data
+
+volumes:
+  imgdata:
